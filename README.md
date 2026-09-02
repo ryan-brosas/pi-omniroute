@@ -81,3 +81,5 @@ bunx tsc --noEmit         # typecheck against pi's ExtensionAPI surface
 ## License
 
 MIT — see [LICENSE](./LICENSE). OmniRoute itself is MIT ([diegosouzapw/OmniRoute](https://github.com/diegosouzapw/OmniRoute)).
+
+[//]: # (ci probe)
