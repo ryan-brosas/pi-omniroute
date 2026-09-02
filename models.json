@@ -1,0 +1,114 @@
+[
+  {
+    "id": "auto",
+    "name": "Auto · OmniRoute smart router",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "claude/claude-sonnet-4-6",
+    "name": "Claude Sonnet 4.6",
+    "reasoning": true,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "cc/claude-sonnet-4-6",
+    "name": "Claude Sonnet 4.6 (Claude Code)",
+    "reasoning": true,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "cc/claude-opus-4-6",
+    "name": "Claude Opus 4.6 (Claude Code)",
+    "reasoning": true,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "glm/glm-5.2",
+    "name": "GLM 5.2",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "cheaperinference/claude-sonnet-4-6",
+    "name": "Claude Sonnet 4.6 (Cheaper Inference)",
+    "reasoning": true,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  }
+]

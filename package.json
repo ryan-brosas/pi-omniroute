@@ -1,0 +1,38 @@
+{
+  "name": "pi-omniroute",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OmniRoute provider extension for pi — one self-hosted gateway endpoint routing 350+ AI providers (Claude, GPT, Gemini, Kimi, GLM, DeepSeek, MiniMax, …) with free tiers, quota-aware auto-fallback, and token compression.",
+  "main": "index.ts",
+  "scripts": {
+    "clean": "echo 'nothing to clean'",
+    "build": "echo 'nothing to build'",
+    "check": "bun scripts/check.ts",
+    "test": "bun tests/probe.ts",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "keywords": [
+    "pi",
+    "extension",
+    "provider",
+    "omniroute",
+    "gateway",
+    "proxy",
+    "ai",
+    "llm",
+    "openai-compatible",
+    "router"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
