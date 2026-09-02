@@ -1,5 +1,7 @@
 # 🔀 pi-omniroute
 
+[![quality](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/quality.yml/badge.svg)](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/quality.yml)
+
 **OmniRoute as an LLM provider for [pi](https://github.com/earendil-works/pi-coding-agent).**
 
 A pi extension that registers the self-hosted [OmniRoute](https://github.com/diegosouzapw/OmniRoute) AI gateway as a native provider. One local endpoint routes pi requests across **350+ upstream providers** (Claude, GPT, Gemini, Kimi, GLM, DeepSeek, MiniMax, …) with quota-aware auto-fallback across subscription → API-key → cheap → free tiers and optional RTK + Caveman token compression.
