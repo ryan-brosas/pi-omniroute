@@ -1,0 +1,86 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package (verify + tarball)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aaa805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+      - name: Build npm tarball
+        run: |
+          mkdir -p dist
+          npm pack --pack-destination dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pi-omniroute-tarball
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 90
+
+  stable:
+    name: Stable release (v* tag)
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pi-omniroute-tarball
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: pi-omniroute ${{ github.ref_name }}
+          body: |
+            Automated GitHub Release for ${{ github.ref_name }}, produced by the
+            release workflow from a verified build (bun run verify). The attached
+            tarball is the same artifact that npm publishes.
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: pi-omniroute-tarball/*.tgz
+          fail_on_unmatched_files: true
+
+  continuous:
+    name: Continuous build (main push)
+    needs: package
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pi-omniroute-tarball
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: continuous-${{ github.sha }}
+          name: Continuous build ${{ github.sha }}
+          body: |
+            Per-push release artifact for commit ${{ github.sha }} — the
+            verification gate (bun run verify) passed and this is the exact npm
+            tarball.
+          prerelease: true
+          files: pi-omniroute-tarball/*.tgz
+          fail_on_unmatched_files: true

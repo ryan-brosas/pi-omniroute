@@ -35,6 +35,13 @@ Release 0.3.0 ships the first npm package (pi-omniroute) plus the catalog-lifecy
 
 ## [Unreleased]
 
+### Added
+
+- `release.yml` release CI — every push to `main` packs the npm tarball after a full
+  `bun run verify` and publishes a `continuous-*` pre-release to GitHub Releases; every
+  `v*` tag produces a stable release with label-driven release notes — an installable
+  artifact always exists after a push.
+
 ## [0.1.0] - 2026-09-02
 
 Initial public release.
