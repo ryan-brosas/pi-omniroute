@@ -82,6 +82,14 @@ const MODEL_SCOPE: ModelScope = (() => {
 const isRouteId = (id: string) => id === "auto" || id.startsWith("auto/");
 const prefixOf = (id: string) => id.split("/")[0] ?? id;
 
+/**
+ * Version of the registered-catalog cut. Bump when a scope's semantics
+ * change (v1: curated-floor union; v2: pure connection cut) — snapshots
+ * persisted under an older cut are rejected so a stale picker cannot
+ * outlive the upgrade.
+ */
+const CATALOG_CUT_VERSION = 2;
+
 // Dashboard origin for the connections API: the gateway serves /v1 and the
 // dashboard from the same origin.
 const DASHBOARD_URL = baseUrl.replace(/\/v1$/, "");
@@ -229,12 +237,14 @@ function saveTombstones(tombstones: Tombstones): void {
  */
 function readStoredModels(stored: unknown): ModelRecord[] {
   if (!stored || typeof stored !== "object") return [];
-  const entry = stored as { models?: unknown; url?: unknown; scope?: unknown };
-  // Snapshots are gateway- AND scope-scoped: a catalog persisted under a
-  // different scope must not leak across (e.g. an upgrade from a pre-scope
-  // all-scope snapshot — no scope field — must not flood the new active
-  // default). Mismatched snapshots degrade to the curated floor.
-  if (entry.url !== baseUrl || entry.scope !== MODEL_SCOPE) return [];
+  const entry = stored as { models?: unknown; url?: unknown; scope?: unknown; cut?: unknown };
+  // Snapshots are gateway-, scope-, and cut-scoped: a catalog persisted
+  // under a different gateway, scope, or cut semantics must not leak across
+  // (e.g. an upgrade from a pre-scope all-scope snapshot — no scope field —
+  // must not flood the new active default, and a v1 active snapshot —
+  // curated union — must not outlive the pure connection cut). Mismatched
+  // snapshots degrade instead.
+  if (entry.url !== baseUrl || entry.scope !== MODEL_SCOPE || entry.cut !== CATALOG_CUT_VERSION) return [];
   return Array.isArray(entry.models)
     ? entry.models.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
     : [];
@@ -401,7 +411,13 @@ async function refreshFor(
     const tombstones = MODEL_SCOPE === "all" ? reconcileTombstones(stored, loadTombstones(), base, now) : {};
     if (MODEL_SCOPE === "all") saveTombstones(tombstones);
     const models = buildModels(base, custom, patch, tombstones, now);
-    const entry = { models: base, checkedAt: now, url: baseUrl, scope: MODEL_SCOPE } as unknown as ModelsStoreEntry;
+    const entry = {
+      models: base,
+      checkedAt: now,
+      url: baseUrl,
+      scope: MODEL_SCOPE,
+      cut: CATALOG_CUT_VERSION,
+    } as unknown as ModelsStoreEntry;
     try {
       await context.publish({
         persist: entry,
