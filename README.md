@@ -44,9 +44,9 @@ Open the model picker (`/model`) and choose an OmniRoute model:
 |-------|-------|
 | `auto` | Smart router — auto-picks provider/fallback across tiers (keyless-ready) |
 | *(live catalog, e.g. `auto/best-coding`, `google/gemini-3-pro`)* | With the gateway running, `/model` lists the ids it reports on `/v1/models`; whether a given upstream actually serves depends on the credentials configured on your OmniRoute instance |
-| *(offline fallback: `claude/claude-sonnet-4-6`, `cc/claude-opus-4-6`, `glm/glm-5.2`, …)* | Registered only when the gateway is unreachable, so the `omniroute` provider still exists in `/model` |
+| *(offline fallback: 37 curated models — `auto` + all built-in `auto/*` routes (`auto/best-coding`, `auto/reasoning:pro`, `auto/vision`, …) + `claude/claude-sonnet-4-6`, `cc/claude-opus-4-6`, `glm/glm-5.2`, …)* | Registered only when the gateway is unreachable, so the `omniroute` provider still exists in `/model` |
 
-> Model ids use the OmniRoute canonical **`<provider>/<model>`** form (e.g. `google/gemini-3-pro`). The live catalog replaces the curated fallback whenever the gateway answers; a paid id also needs that upstream's credentials on the gateway side. Non-chat image and video entries in the catalog are filtered out — pi only drives chat completions.
+> Model ids use the OmniRoute canonical **`<provider>/<model>`** form (e.g. `google/gemini-3-pro`). `auto/*` are OmniRoute's built-in router routes that resolve on demand; the curated fallback ships the full upstream set (verified against the builtin catalog), so the offline picker still offers them. The live catalog replaces the curated fallback whenever the gateway answers; a paid id also needs that upstream's credentials on the gateway side. Non-chat image and video entries in the catalog are filtered out — pi only drives chat completions.
 
 ## Configuration
 
@@ -76,12 +76,16 @@ Each live entry gets metadata (reasoning / vision / context limits) via id heuri
 
 ## Development
 
+Package manager: **Bun** — the repo ships `bun.lock` and CI runs `oven-sh/setup-bun`. The gates are plain scripts, so npm/pnpm can run them too; only the Bun lockfile is committed.
+
 ```bash
-bun scripts/check.ts      # shape + export gate (no deps needed)
-bun tests/probe.ts        # behavioral probes against a simulated gateway
-bun install               # once, for dev typechecking
-bunx tsc --noEmit         # typecheck against pi's ExtensionAPI surface
+bun install --frozen-lockfile   # devDependencies for typechecking
+bun run verify                  # check gate + probes + typecheck, one shot
 ```
+
+- Contributing rules, data curation, and PR conventions: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Changelog: [CHANGELOG.md](./CHANGELOG.md)
+- New pull requests are screened by the anti-slop gate ([peakoss/anti-slop](https://github.com/peakoss/anti-slop))
 
 ## License
 
