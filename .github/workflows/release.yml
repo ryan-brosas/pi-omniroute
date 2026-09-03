@@ -70,28 +70,14 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write # npm provenance statements (OIDC)
+      id-token: write # npm trusted publishing (OIDC, configured on npmjs.com)
     steps:
-      - name: Guard - skip when NPM_TOKEN is not configured
-        id: token
-        env:
-          HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
-        run: |
-          if [ "$HAS_TOKEN" != "true" ]; then
-            echo "::warning::NPM_TOKEN secret is not set - skipping npm publish (Settings > Secrets and variables > Actions)"
-          fi
-          echo "available=$HAS_TOKEN" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: pi-omniroute-tarball
           path: pi-omniroute-tarball
       - name: Publish the verified tarball to npm
-        if: steps.token.outputs.available == 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > ~/.npmrc
-          npm publish pi-omniroute-tarball/*.tgz --provenance --access public
+        run: npm publish pi-omniroute-tarball/*.tgz --provenance --access public
 
   continuous:
     name: Continuous build (main push)

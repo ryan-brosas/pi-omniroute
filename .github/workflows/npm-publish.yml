@@ -22,16 +22,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write # npm provenance statements (OIDC)
+      id-token: write # npm trusted publishing (OIDC, configured on npmjs.com)
     steps:
-      - name: Guard - NPM_TOKEN must be configured
-        env:
-          HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
-        run: |
-          if [ "$HAS_TOKEN" != "true" ]; then
-            echo "::error::NPM_TOKEN secret is not set (Settings > Secrets and variables > Actions). Add an npm automation token with publish rights, then re-run."
-            exit 1
-          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -54,8 +46,4 @@ jobs:
           mkdir -p dist
           npm pack --pack-destination dist
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          echo '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > ~/.npmrc
-          npm publish dist/*.tgz --provenance --access public
+        run: npm publish dist/*.tgz --provenance --access public
