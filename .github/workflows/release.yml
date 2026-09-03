@@ -62,14 +62,8 @@ jobs:
           files: pi-omniroute-tarball/*.tgz
           fail_on_unmatched_files: true
 
-  npm-publish:
-    name: npm publish (v* tag)
-    needs: package
-    if: startsWith(github.ref, 'refs/tags/v')
-    uses: ./.github/workflows/npm-publish.yml
-    permissions:
-      contents: read
-      id-token: write # npm trusted publishing (OIDC, registered via npm trust github)
+  # npm publish is owned by npm-publish.yml (single trusted publisher per
+  # package): trigger it with `gh workflow run npm-publish.yml` after tagging.
 
   continuous:
     name: Continuous build (main push)
