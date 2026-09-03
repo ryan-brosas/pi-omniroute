@@ -7,12 +7,6 @@ on:
         description: 'Version to publish (empty = package.json version). Must not already exist on npm.'
         required: false
         type: string
-  workflow_call:
-    inputs:
-      version:
-        description: 'Version to publish (empty = package.json version). Must not already exist on npm.'
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -27,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write # GitHub Release (tag + tarball)
       id-token: write # npm trusted publishing (OIDC, registered via npm trust github)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,3 +52,15 @@ jobs:
           npm pack --pack-destination dist
       - name: Publish to npm
         run: npm publish ./dist/*.tgz --provenance --access public
+      - name: Cut the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "release v$VERSION already exists - skipping"
+            exit 0
+          fi
+          ARGS=(--title "pi-omniroute v$VERSION" --generate-release-notes --latest)
+          case "$VERSION" in *-*) ARGS=(--title "pi-omniroute v$VERSION" --generate-release-notes --prerelease);; esac
+          gh release create "v$VERSION" ./dist/*.tgz "${ARGS[@]}"

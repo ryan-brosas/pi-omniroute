@@ -10,6 +10,11 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 ## [Unreleased]
 
+### Changed
+
+- `npm-publish.yml` now cuts the GitHub Release itself (tag `v<version>`, tarball attached,
+  prerelease for hyphenated versions) — every npm publish ships both artifacts in one run.
+
 ### Fixed
 
 - npm publishing is single-pathed: npm allows one trusted publisher per package, and GitHub's OIDC token for a reusable-workflow call carries the calling workflow's file — which cannot match a registration on `npm-publish.yml`. The tag-triggered publish job was removed from `release.yml`; `npm-publish.yml` (Actions → npm publish, or `gh workflow run npm-publish.yml`) is the one publish path. README updated to match.
