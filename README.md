@@ -82,7 +82,7 @@ Keyless mode: pick `auto` — OmniRoute answers from the pre-wired free tiers; n
 
 ## How it works
 
-1. **Zero-latency startup** — the provider registers immediately from the disk cache ∪ the curated `models.json`; registration never awaits the network.
+1. **Zero-latency startup** — the provider registers immediately from the curated `models.json` plus tombstone grace; registration never awaits the network. pi re-resolves the persisted catalog through `refreshModels` on its own cadence.
 2. **Platform-native refresh** — the extension implements `ProviderConfig.refreshModels`: pi owns the cadence, the persisted catalog store (`publish({persist})`), and offline/cache-only phases (`allowNetwork`). Each refresh layers live `/v1/models` → curated fields → `patch.json` → `custom-models.json` → tombstoned ids (14-day grace) and hot-swaps the registration.
 3. **Fallback** — with no cache and an unreachable gateway, the curated fallback keeps the provider registered.
 

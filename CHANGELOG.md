@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `release.yml` release CI — every push to `main` packs the npm tarball after a full
+  `bun run verify` and publishes a `continuous-*` pre-release to GitHub Releases; every
+  `v*` tag produces a stable release with label-driven release notes — an installable
+  artifact always exists after a push.
+
+### Fixed
+
+- `release.yml` artifact hand-off: `actions/download-artifact@v4` extracts a named
+  artifact into the workspace root, so both release jobs globbed a
+  `pi-omniroute-tarball/` directory that never existed — the workflow had never
+  completed. Download steps now extract into `pi-omniroute-tarball/`.
+
 ## [0.3.0] - 2026-09-03
 
 Release 0.3.0 ships the first npm package (pi-omniroute) plus the catalog-lifecycle and curation work below.
@@ -11,6 +27,9 @@ Release 0.3.0 ships the first npm package (pi-omniroute) plus the catalog-lifecy
 ### Changed
 
 - Catalog lifecycle now uses pi's `ProviderConfig.refreshModels` hook: pi owns the cadence, the persisted catalog store (`publish`), and offline/cache-only phases (`allowNetwork`). The extension's own disk cache was dropped; only the gateway-keyed tombstone store remains on disk (`OMNIROUTE_CACHE_DIR`). Test suite rewritten around the hook.
+- `tests/probe.ts` derives the offline-fallback size from `models.json` instead of a
+  hard-coded count, so curated additions no longer break the probe.
+- Package version 0.3.0 (npm publish: tarball ships index.ts, models.ts, curated data, README, LICENSE, CHANGELOG; `pi-package` keyword; peer deps on pi core packages; `prepublishOnly` runs the full gate).
 
 ### Added
 
@@ -26,21 +45,6 @@ Release 0.3.0 ships the first npm package (pi-omniroute) plus the catalog-lifecy
   action (pinned v0.3.0) flags low-quality / AI-slop pull requests.
 - Dependabot now also tracks `package.json` (`npm` ecosystem, Bun lockfile),
   grouped into a single `js` PR.
-
-### Changed
-
-- `tests/probe.ts` derives the offline-fallback size from `models.json` instead of a
-  hard-coded count, so curated additions no longer break the probe.
-- Package version 0.3.0 (npm publish: tarball ships index.ts, models.ts, curated data, README, LICENSE, CHANGELOG; `pi-package` keyword; peer deps on pi core packages; `prepublishOnly` runs the full gate).
-
-## [Unreleased]
-
-### Added
-
-- `release.yml` release CI — every push to `main` packs the npm tarball after a full
-  `bun run verify` and publishes a `continuous-*` pre-release to GitHub Releases; every
-  `v*` tag produces a stable release with label-driven release notes — an installable
-  artifact always exists after a push.
 
 ## [0.1.0] - 2026-09-02
 
