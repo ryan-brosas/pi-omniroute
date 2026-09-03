@@ -143,7 +143,7 @@ function freshCacheDir(): string {
 }
 
 // ---- Store + refresh harness: mimics pi's catalog store and refresh hook -----
-interface Stored { models?: unknown[]; checkedAt?: number; url?: string; }
+interface Stored { models?: unknown[]; checkedAt?: number; url?: string; scope?: unknown; }
 let stored: Stored | undefined;
 
 async function invokeRefresh(options: { allowNetwork?: boolean; publishFails?: boolean } = {}): Promise<Array<Record<string, unknown>>> {
@@ -167,6 +167,7 @@ async function invokeRefresh(options: { allowNetwork?: boolean; publishFails?: b
           models: publication.persist.models,
           checkedAt: publication.persist.checkedAt,
           url: (publication.persist as { url?: string }).url,
+          scope: (publication.persist as { scope?: unknown }).scope,
         };
       }
       if (publication.update) publication.update();
@@ -342,6 +343,7 @@ async function probeOfflineWarm(): Promise<void> {
   process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
   stored = {
     url: "http://127.0.0.1:1/v1",
+    scope: "all",
     models: [
       { ...AUTO_RECORD },
       { ...OLD_RECORD, id: "a-random/unknown-model-1b", maxTokens: 4096 },
@@ -380,7 +382,7 @@ async function probeTombstones(): Promise<void> {
     // The gateway no longer serves provider/old-model.
     catalog = [{ id: "auto", object: "model" }, { id: "google/gemini-3-pro", object: "model", name: "Gemini 3 Pro" }];
     // The pi store holds the soon-to-be-delisted record; the gateway dropped it.
-    stored = { url: baseUrlFor(port), models: [AUTO_RECORD, OLD_RECORD] };
+    stored = { url: baseUrlFor(port), scope: "all", models: [AUTO_RECORD, OLD_RECORD] };
     registrations.length = 0;
 
     const mod = await importIndex("../index.ts?probe=tomb");
@@ -594,20 +596,25 @@ async function probeScope(): Promise<void> {
     process.env.OMNIROUTE_MODEL_SCOPE = "active";
     fakeConnections = JSON.stringify({
       connections: [
-        { isActive: true, providerSpecificData: { prefix: "google" } },
+        { isActive: true, provider: "google" },
+        { isActive: true, provider: "claude" },
         { isActive: false, providerSpecificData: { prefix: "a-random" } },
       ],
     });
+    catalog = [...defaultCatalog(), { id: "cc/claude-fake-9", object: "model" }];
     registrations.length = 0;
     stored = undefined;
     const mod = await importIndex("../index.ts?probe=scope-active");
     await mod.default(fakePi);
     const refreshed = await invokeRefresh();
     const ids = refreshed.map((m) => String(m.id));
-    assert(ids.includes("google/gemini-3-pro") && ids.includes("google/gemini-2.5-pro"), "active-connection prefixes registered");
+    assert(ids.includes("google/gemini-3-pro") && ids.includes("google/gemini-2.5-pro"), "standard rows: top-level provider field used as prefix");
+    assert(ids.includes("cc/claude-fake-9"), "canonical alias (claude -> cc) keeps aliased catalog ids");
     assert(!ids.includes("a-random/unknown-model-1b"), "disabled-connection prefixes dropped");
     assert(ids.includes("cc/claude-sonnet-4-6"), "curated floor unioned in");
-    assert(refreshed.length === CURATED_COUNT + 2, `curated floor + active-connection ids, got ${refreshed.length}`);
+    assert(refreshed.length === CURATED_COUNT + 3, `curated floor + active-connection ids, got ${refreshed.length}`);
+    assert((stored as Stored | undefined)?.scope === "active", "published snapshot records its scope");
+    catalog = defaultCatalog();
     delete process.env.OMNIROUTE_MODEL_SCOPE;
     void mod;
     console.log(`probe 14 OK — active scope: ${refreshed.length} ids (curated floor + active connections)`);
@@ -669,6 +676,34 @@ async function probeScope(): Promise<void> {
   });
 }
 
+async function probeStoreScoping(): Promise<void> {
+  // Unreachable gateway: only the offline phases run, so the assertions are
+  // purely about which stored snapshots a scope accepts.
+  process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1";
+  process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+  process.env.OMNIROUTE_MODEL_SCOPE = "active";
+  registrations.length = 0;
+  const mod = await importIndex("../index.ts?probe=store-scope");
+  await mod.default(fakePi);
+  const url = baseUrlFor(1);
+  // Foreign-scope snapshot (persisted under all): rejected offline.
+  stored = { url, scope: "all", models: [OLD_RECORD] };
+  let offline = await invokeRefresh({ allowNetwork: false });
+  assert(offline.length === CURATED_COUNT, `foreign-scope snapshot rejected, curated floor served, got ${offline.length}`);
+  assert(!offline.some((m) => String(m.id) === "provider/old-model"), "foreign-scope ids not leaked");
+  // Legacy snapshot without a scope field (pre-scope upgrade): rejected too.
+  stored = { url, models: [OLD_RECORD] };
+  offline = await invokeRefresh({ allowNetwork: false });
+  assert(offline.length === CURATED_COUNT, "legacy scope-less snapshot rejected");
+  // Same-scope snapshot: served offline.
+  stored = { url, scope: "active", models: [AUTO_RECORD, OLD_RECORD] };
+  offline = await invokeRefresh({ allowNetwork: false });
+  assert(offline.length === 2 && offline[0].id === "auto", "same-scope snapshot served offline");
+  delete process.env.OMNIROUTE_MODEL_SCOPE;
+  void mod;
+  console.log("probe 18 OK — store snapshots are scope-aware");
+}
+
 async function probePublishRejects(): Promise<void> {
   await withGateway(async (port) => {
     process.env.OMNIROUTE_API_KEY = "reject-key";
@@ -705,6 +740,7 @@ try {
   await probeGatewayScoping();
   await probePublishRejects();
   await probeScope();
+  await probeStoreScoping();
   console.log("ALL PROBES PASSED");
 } finally {
   for (const dir of cacheDirs) fs.rmSync(dir, { recursive: true, force: true });

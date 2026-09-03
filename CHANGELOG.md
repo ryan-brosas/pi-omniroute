@@ -49,7 +49,12 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
   `models.json` + `custom-models.json` + patches, fully offline), `routes` (the auto
   router + `auto/*` only), or `all` (the full live `/v1/models` catalog with
   tombstones and the persisted store). The 500+-entry live catalog swamped the
-  `/model` picker; `active` keeps it to the ids your gateway actually backs.
+  `/model` picker; `active` keeps it to the ids your gateway actually backs. Both
+  connection shapes are handled (compatible rows via `providerSpecificData.prefix`,
+  standard API-key/OAuth rows via the top-level `provider` field, mapped through
+  OmniRoute's provider-to-catalog aliases such as claude → cc), and pi-owned catalog
+  snapshots are scope-aware: switching `OMNIROUTE_MODEL_SCOPE` no longer reuses the
+  previous scope's stored catalog.
 - `release.yml` release CI — every push to `main` packs the npm tarball after a full
   `bun run verify` and publishes a `continuous-*` pre-release to GitHub Releases; every
   `v*` tag produces a stable release with label-driven release notes and publishes the

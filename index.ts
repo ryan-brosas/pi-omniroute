@@ -87,11 +87,19 @@ const prefixOf = (id: string) => id.split("/")[0] ?? id;
 const DASHBOARD_URL = baseUrl.replace(/\/v1$/, "");
 
 /**
+ * OmniRoute's canonical provider-to-catalog aliases: a standard connection
+ * row whose `provider` field routes models under a different catalog prefix
+ * (verified against the gateway catalog — a claude connection serves cc/*).
+ */
+const PROVIDER_CATALOG_ALIASES: Record<string, string> = { claude: "cc" };
+
+/**
  * Prefixes with an enabled backing connection. The connections payload
- * carries masked keys — only isActive and providerSpecificData.prefix are
- * read, nothing is persisted. Returns null when the dashboard API is
- * unavailable (older gateway, auth-protected) or no connection is enabled:
- * callers then degrade to the curated floor instead of guessing.
+ * carries masked keys — only isActive, provider, and
+ * providerSpecificData.prefix are read, nothing is persisted. Returns null
+ * when the dashboard API is unavailable (older gateway, auth-protected) or
+ * no connection is enabled: callers then degrade to the curated floor
+ * instead of guessing.
  */
 async function fetchActivePrefixes(
   apiKey: string | undefined,
@@ -115,11 +123,22 @@ async function fetchActivePrefixes(
         if (!raw || typeof raw !== "object") continue;
         const connection = raw as {
           isActive?: unknown;
+          provider?: unknown;
           providerSpecificData?: { prefix?: unknown } | null;
         };
         if (connection.isActive === false) continue; // disabled; transient backoff still counts
-        const prefix = connection.providerSpecificData?.prefix;
-        if (typeof prefix === "string" && prefix.trim()) prefixes.add(prefix.trim());
+        // Compatible connections namespace their models under
+        // providerSpecificData.prefix; standard API-key/OAuth rows identify
+        // via the top-level provider field (mapped through the canonical
+        // provider-to-catalog aliases, e.g. claude -> cc). Collect all.
+        const psdPrefix = connection.providerSpecificData?.prefix;
+        if (typeof psdPrefix === "string" && psdPrefix.trim()) prefixes.add(psdPrefix.trim());
+        if (typeof connection.provider === "string" && connection.provider.trim()) {
+          const provider = connection.provider.trim();
+          prefixes.add(provider);
+          const alias = PROVIDER_CATALOG_ALIASES[provider];
+          if (alias) prefixes.add(alias);
+        }
       }
       return prefixes.size > 0 ? prefixes : null;
     } finally {
@@ -210,8 +229,12 @@ function saveTombstones(tombstones: Tombstones): void {
  */
 function readStoredModels(stored: unknown): ModelRecord[] {
   if (!stored || typeof stored !== "object") return [];
-  const entry = stored as { models?: unknown; url?: unknown };
-  if (entry.url !== baseUrl) return [];
+  const entry = stored as { models?: unknown; url?: unknown; scope?: unknown };
+  // Snapshots are gateway- AND scope-scoped: a catalog persisted under a
+  // different scope must not leak across (e.g. an upgrade from a pre-scope
+  // all-scope snapshot — no scope field — must not flood the new active
+  // default). Mismatched snapshots degrade to the curated floor.
+  if (entry.url !== baseUrl || entry.scope !== MODEL_SCOPE) return [];
   return Array.isArray(entry.models)
     ? entry.models.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
     : [];
@@ -377,7 +400,7 @@ async function refreshFor(
     const tombstones = MODEL_SCOPE === "all" ? reconcileTombstones(stored, loadTombstones(), base, now) : {};
     if (MODEL_SCOPE === "all") saveTombstones(tombstones);
     const models = buildModels(base, custom, patch, tombstones, now);
-    const entry = { models: base, checkedAt: now, url: baseUrl } as unknown as ModelsStoreEntry;
+    const entry = { models: base, checkedAt: now, url: baseUrl, scope: MODEL_SCOPE } as unknown as ModelsStoreEntry;
     try {
       await context.publish({
         persist: entry,
