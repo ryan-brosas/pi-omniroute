@@ -129,12 +129,16 @@ async function invokeRefresh(options: { allowNetwork?: boolean } = {}): Promise<
     allowNetwork: options.allowNetwork ?? true,
     signal: new AbortController().signal,
     publish: async (publication: {
-      persist?: { models?: unknown[]; checkedAt?: number } | null;
+      persist?: { models?: unknown[]; checkedAt?: number; url?: string } | null;
       update?: () => void;
     }) => {
       if (publication.persist === null) stored = undefined;
       else if (publication.persist) {
-        stored = { models: publication.persist.models, checkedAt: publication.persist.checkedAt };
+        stored = {
+          models: publication.persist.models,
+          checkedAt: publication.persist.checkedAt,
+          url: (publication.persist as { url?: string }).url,
+        };
       }
       if (publication.update) publication.update();
       return true;
@@ -306,6 +310,13 @@ async function probeOfflineWarm(): Promise<void> {
   };
   process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1";
   process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+  stored = {
+    url: "http://127.0.0.1:1/v1",
+    models: [
+      { ...AUTO_RECORD },
+      { ...OLD_RECORD, id: "a-random/unknown-model-1b", maxTokens: 4096 },
+    ],
+  };
   registrations.length = 0;
   const mod = await import("../index.ts?probe=warm");
   await mod.default(fakePi);
@@ -339,7 +350,7 @@ async function probeTombstones(): Promise<void> {
     // The gateway no longer serves provider/old-model.
     catalog = [{ id: "auto", object: "model" }, { id: "google/gemini-3-pro", object: "model", name: "Gemini 3 Pro" }];
     // The pi store holds the soon-to-be-delisted record; the gateway dropped it.
-    stored = { models: [AUTO_RECORD, OLD_RECORD] };
+    stored = { url: baseUrlFor(port), models: [AUTO_RECORD, OLD_RECORD] };
     registrations.length = 0;
 
     const mod = await import("../index.ts?probe=tomb");
@@ -432,6 +443,33 @@ async function probePipeline(): Promise<void> {
   console.log("probe 8 OK — patch/custom precedence, sanitation, tombstone TTL");
 }
 
+async function probeGatewayScoping(): Promise<void> {
+  // Session 1 refreshes against gateway A and publishes a catalog.
+  await withGateway(async (portA) => {
+    process.env.OMNIROUTE_API_KEY = "scope-key";
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(portA);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    registrations.length = 0;
+    stored = undefined;
+    const mod = await import("../index.ts?probe=scopeA");
+    await mod.default(fakePi);
+    const modelsA = await invokeRefresh();
+    assert(modelsA.length === 5, "gateway A catalog refreshed");
+    assert(stored?.url === baseUrlFor(portA), "publication carries the gateway url");
+  });
+  // Session 2 (new process env): different gateway URL, offline store kept.
+  delete process.env.OMNIROUTE_API_KEY;
+  process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1";
+  process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+  registrations.length = 0;
+  const modB = await import("../index.ts?probe-scopeB");
+  await modB.default(fakePi);
+  const offline = await invokeRefresh({ allowNetwork: false });
+  assert(offline.length === CURATED_COUNT, "gateway B serves curated — A's catalog is not leaked offline");
+  assert(!offline.some((m) => m.id === "google/gemini-3-pro"), "no gateway-A only ids leak into B");
+  console.log("probe 11 OK — foreign stored snapshot rejected, curated fallback preserved");
+}
+
 async function probeHeaders(): Promise<void> {
   const harness = async (keyed: boolean) => {
     process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1";
@@ -502,6 +540,7 @@ try {
   await probePipeline();
   await probeHeaders();
   await probeCap();
+  await probeGatewayScoping();
   console.log("ALL PROBES PASSED");
 } finally {
   for (const dir of cacheDirs) fs.rmSync(dir, { recursive: true, force: true });

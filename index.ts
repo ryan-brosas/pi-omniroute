@@ -121,12 +121,18 @@ function saveTombstones(tombstones: Tombstones): void {
   }
 }
 
-/** Models persisted by a previous pi session, read back from the store. */
+/**
+ * Models persisted by a previous pi session, read back from the store.
+ * The pi store is keyed only by provider id, so every publication carries the
+ * gateway origin and snapshots from another OMNIROUTE_BASE_URL are rejected —
+ * an offline session must never serve the previous gateway's catalog.
+ */
 function readStoredModels(stored: unknown): ModelRecord[] {
   if (!stored || typeof stored !== "object") return [];
-  const raw = (stored as { models?: unknown }).models;
-  return Array.isArray(raw)
-    ? raw.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
+  const entry = stored as { models?: unknown; url?: unknown };
+  if (entry.url !== baseUrl) return [];
+  return Array.isArray(entry.models)
+    ? entry.models.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
     : [];
 }
 
@@ -206,6 +212,19 @@ function resolveApiKey(): string | undefined {
   return key || undefined;
 }
 
+/**
+ * The key used for catalog discovery. Prefers pi's effective credential
+ * (a stored /login key) over the env var, but never sends the keyless
+ * placeholder when pi reports it as the resolved key.
+ */
+function effectiveApiKey(context: { credential?: unknown }): string | undefined {
+  const credential = context.credential as { type?: unknown; key?: unknown } | undefined;
+  if (credential && credential.type === "api_key" && typeof credential.key === "string") {
+    if (credential.key.length > 0 && credential.key !== KEYLESS_API_KEY) return credential.key;
+  }
+  return resolveApiKey();
+}
+
 /** Register base + custom + patch, with tombstoned grace models appended. */
 function registerModels(pi: ExtensionAPI, models: ModelRecord[]): void {
   pi.registerProvider(PROVIDER_ID, {
@@ -231,7 +250,7 @@ async function refreshFor(
   pi: ExtensionAPI,
   context: RefreshModelsContext,
 ): Promise<ProviderModelConfig[]> {
-  const apiKey = resolveApiKey();
+  const apiKey = effectiveApiKey(context);
   const stored = readStoredModels(context.stored);
   if (!context.allowNetwork) {
     // Cache-only phase: serve the persisted catalog without any fetch.
@@ -244,7 +263,7 @@ async function refreshFor(
     const tombstones = reconcileTombstones(stored, loadTombstones(), base, now);
     saveTombstones(tombstones);
     const models = buildModels(base, custom, patch, tombstones, now);
-    const entry = { models: base, checkedAt: now } as unknown as ModelsStoreEntry;
+    const entry = { models: base, checkedAt: now, url: baseUrl } as unknown as ModelsStoreEntry;
     await context.publish({
       persist: entry,
       update: () => registerModels(pi, models),
