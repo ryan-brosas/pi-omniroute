@@ -7,6 +7,12 @@ on:
         description: 'Version to publish (empty = package.json version). Must not already exist on npm.'
         required: false
         type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to publish (empty = package.json version). Must not already exist on npm.'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -22,7 +28,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write # npm trusted publishing (OIDC, configured on npmjs.com)
+      id-token: write # npm trusted publishing (OIDC, registered via npm trust github)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

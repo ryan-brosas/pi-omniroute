@@ -66,23 +66,10 @@ jobs:
     name: npm publish (v* tag)
     needs: package
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    uses: ./.github/workflows/npm-publish.yml
     permissions:
       contents: read
-      id-token: write # npm trusted publishing (OIDC, configured on npmjs.com)
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: pi-omniroute-tarball
-          path: pi-omniroute-tarball
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0 (OIDC-capable npm)
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-          package-manager-cache: false
-      - name: Publish the verified tarball to npm
-        run: npm publish ./pi-omniroute-tarball/*.tgz --provenance --access public
+      id-token: write # npm trusted publishing (OIDC, registered via npm trust github)
 
   continuous:
     name: Continuous build (main push)
