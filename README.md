@@ -22,16 +22,24 @@ omniroute                # boots gateway + dashboard on http://localhost:20128
 
 Docker, source, pnpm installs: see [OmniRoute docs](https://github.com/diegosouzapw/OmniRoute).
 
-### 2. Add this extension to pi
+### 2. Install the pi-omniroute package
 
 ```bash
-pi -e /path/to/pi-omniroute
+pi install npm:pi-omniroute@latest
 ```
 
-or in `~/.pi/agent/pi.json` (or a project config):
+or as a one-off without installing:
+
+```bash
+pi -e npm:pi-omniroute
+```
+
+Prefer the npm package; for local development, `pi -e /path/to/pi-omniroute` works too.
+Install from source instead of npm:
 
 ```json
 {
+  "packages": ["npm:pi-omniroute@latest"],
   "extensions": ["/absolute/path/to/pi-omniroute"]
 }
 ```
