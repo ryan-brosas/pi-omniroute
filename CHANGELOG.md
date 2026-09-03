@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Catalog lifecycle now uses pi's `ProviderConfig.refreshModels` hook: pi owns the cadence, the persisted catalog store (`publish`), and offline/cache-only phases (`allowNetwork`). The extension's own disk cache was dropped; only the gateway-keyed tombstone store remains on disk (`OMNIROUTE_CACHE_DIR`). Test suite rewritten around the hook.
+
 ### Added
 
 - `auto/*` built-in router ids to the curated fallback (`models.json`): the full
@@ -27,7 +31,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hard-coded count, so curated additions no longer break the probe.
 - Package version 0.2.0.
 
-## [0.1.0] - 2025-09-03
+## [0.1.0] - 2026-09-02
 
 Initial public release.
 

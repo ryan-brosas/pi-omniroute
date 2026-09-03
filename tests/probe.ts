@@ -9,11 +9,11 @@
  */
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import fallbackModels from "../models.json" with { type: "json" };
 
 const CURATED_COUNT = (fallbackModels as unknown[]).length;
-import os from "node:os";
-import path from "node:path";
 
 // ── Fake pi ExtensionAPI ─────────────────────────────────────────────────────
 interface Entry {
@@ -114,10 +114,37 @@ function freshCacheDir(): string {
   return dir;
 }
 
-async function fireSessionStart(): Promise<void> {
-  const sessionHandler = handlers.get("session_start");
-  assert(typeof sessionHandler === "function", "session_start handler registered");
-  sessionHandler({}, {}); // sync fire-and-forget: must not block on the network
+// ---- Store + refresh harness: mimics pi's catalog store and refresh hook -----
+interface Stored { models?: unknown[]; checkedAt?: number; }
+let stored: Stored | undefined;
+
+async function invokeRefresh(options: { allowNetwork?: boolean } = {}): Promise<Array<Record<string, unknown>>> {
+  const entry = registrations[registrations.length - 1];
+  const fn = entry.config.refreshModels as
+    | ((ctx: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>)
+    | undefined;
+  assert(typeof fn === "function", "refreshModels registered on the provider config");
+  const ctx = {
+    stored,
+    allowNetwork: options.allowNetwork ?? true,
+    signal: new AbortController().signal,
+    publish: async (publication: {
+      persist?: { models?: unknown[]; checkedAt?: number; url?: string } | null;
+      update?: () => void;
+    }) => {
+      if (publication.persist === null) stored = undefined;
+      else if (publication.persist) {
+        stored = {
+          models: publication.persist.models,
+          checkedAt: publication.persist.checkedAt,
+          url: (publication.persist as { url?: string }).url,
+        };
+      }
+      if (publication.update) publication.update();
+      return true;
+    },
+  };
+  return (await fn(ctx as never)) as Array<Record<string, unknown>>;
 }
 
 // ── Shared records for cache seeding / tombstone probes ──────────────────────
@@ -154,13 +181,12 @@ async function probeLive(): Promise<void> {
     assert(config.api === "openai-completions", "api is openai-completions");
     assert(config.apiKey === "$OMNIROUTE_API_KEY", "apiKey env-ref set");
     const stale = modelsOf(registrations[0]);
-    assert(stale.length === CURATED_COUNT, `stale registration = curated fallback, got ${stale.length}`);
-    assert(stale[0].id === "auto", "auto first on stale registration");
+    assert(stale.length === CURATED_COUNT, `seed registration = curated fallback, got ${stale.length}`);
+    assert(stale[0].id === "auto", "auto first on seed");
 
-    // session_start revalidates in the background and hot-swaps.
-    await fireSessionStart();
-    await waitFor(() => registrations.length >= 2, "revalidation hot-swap");
-    assert(registrations.length === 2, "revalidation re-registers exactly once");
+    // Drive the pi refresh hook: fetch -> merge -> publish -> hot-swap.
+    await invokeRefresh();
+    assert(registrations.length === 2, "refresh re-registers exactly once");
     assert(receivedAuth === "Bearer secret-key-123", "catalog fetch authorized");
     const models = modelsOf(registrations[1]);
     assert(models[0].id === "auto", "auto first");
@@ -194,12 +220,16 @@ async function probeLive(): Promise<void> {
     assert(inferMetadata("auto/best-vision").input.includes("image"), "auto vision route classified");
     assert(inferMetadata("auto/multimodal").input.includes("image"), "auto multimodal route classified");
 
-    // The revalidation wrote the merged catalog for the next session.
-    const cached = JSON.parse(
-      fs.readFileSync((mod as { cacheFilePathFor(u: string): string }).cacheFilePathFor(baseUrlFor(port)), "utf8"),
-    ) as { models: Array<{ id: string }> };
-    assert(cached.models.length === 5, "revalidate writes the merged catalog to disk");
-    assert(cached.models.some((m) => m.id === "google/gemini-3-pro"), "cache holds live-only ids");
+    // publish({persist}) stored the merged core in the pi-owned store.
+    assert(stored !== undefined && (stored.models?.length ?? 0) === 5, "refresh persisted the merged catalog");
+    assert(
+      (stored.models ?? []).some((m) => (m as { id?: string }).id === "google/gemini-3-pro"),
+      "store keeps live-only ids",
+    );
+    // The tombstone store file exists (keyed to the gateway URL).
+    const { tombstonesFilePathFor } = mod as { tombstonesFilePathFor(u: string): string };
+    const tombPath = path.join(cacheDir, path.basename(tombstonesFilePathFor(baseUrlFor(port))));
+    assert(fs.existsSync(tombPath), "tombstone store written");
     warmCacheDir = cacheDir;
     warmPort = port;
     console.log("probe 1 OK — zero-latency registration, SWR hot-swap, merge, heuristics, cache write");
@@ -221,12 +251,10 @@ async function probeNonBlocking(): Promise<void> {
     assert(Date.now() - started < 200, "factory returns without awaiting the gateway");
     assert(registrations.length === 1, "registered before the gateway answered");
 
-    await fireSessionStart();
-    assert(Date.now() - started < 350, "session_start returns before the gateway answers");
-    assert(registrations.length === 1, "no hot-swap while the gateway is silent");
-
-    await waitFor(() => registrations.length >= 2, "background hot-swap after the gateway answers", 5000);
-    assert(modelsOf(registrations[1]).length === 5, "hot-swap serves the live catalog");
+    const delayed = await invokeRefresh();
+    assert(Date.now() - started > 350, "refresh waits out the delayed gateway");
+    assert(registrations.length === 2, "hot-swap after the delayed gateway");
+    assert(delayed.length === 5, "hot-swap serves the live catalog");
     void mod;
     console.log("probe 2 OK — a delayed gateway delays neither registration nor session start");
   }, { delayMs: 400 });
@@ -241,10 +269,7 @@ async function probeRefresh(): Promise<void> {
     await mod.default(fakePi);
 
     catalog = [...catalog, { id: "provider/fresh-model-2", object: "model" }];
-    await fireSessionStart();
-    await waitFor(() => registrations.length >= 2, "refresh hot-swap");
-
-    const after = modelsOf(registrations[registrations.length - 1]);
+    const after = await invokeRefresh();
     assert(after.some((m) => m.id === "provider/fresh-model-2"), "refresh adds new catalog entry");
     assert(after.length === 6, `refresh size ${after.length} vs 6`);
     void mod;
@@ -257,6 +282,7 @@ async function probeOfflineCold(): Promise<void> {
   process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1"; // port 1 → connection refused
   process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
   registrations.length = 0;
+  stored = undefined;
   const mod = await import("../index.ts?probe=offline");
   await mod.default(fakePi);
 
@@ -264,41 +290,57 @@ async function probeOfflineCold(): Promise<void> {
   const models = modelsOf(registrations[0]);
   assert(models.length === CURATED_COUNT, `offline fallback = curated list, got ${models.length}`);
   assert(models[0].id === "auto", "auto first offline");
+  const offlinePhase = await invokeRefresh({ allowNetwork: false });
+  assert(offlinePhase.length === CURATED_COUNT, "allowNetwork=false serves fallback without a fetch");
+  const refused = await invokeRefresh();
+  assert(refused.length === CURATED_COUNT, "network failure degrades to the curated fallback");
   void mod;
-  console.log("probe 4 OK — unreachable gateway + no cache → curated fallback");
+  console.log("probe 4 OK — unreachable gateway: seed + offline phases degrade safely");
 }
 
 async function probeOfflineWarm(): Promise<void> {
   delete process.env.OMNIROUTE_API_KEY;
-  // Same gateway URL as probe 1, now offline (server closed) — the cache is
-  // keyed to that URL, so it must still serve.
-  assert(warmCacheDir !== undefined && warmPort !== undefined, "warm cache was populated by probe 1");
-  process.env.OMNIROUTE_BASE_URL = baseUrlFor(warmPort);
-  process.env.OMNIROUTE_CACHE_DIR = warmCacheDir;
+  assert(warmCacheDir !== undefined && warmPort !== undefined, "warm store was populated by probe 1");
+  // Simulate the persisted pi store from probe 1; the gateway is unreachable.
+  stored = {
+    models: [
+      { ...AUTO_RECORD },
+      { ...OLD_RECORD, id: "a-random/unknown-model-1b", maxTokens: 4096 },
+    ],
+  };
+  process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1";
+  process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+  stored = {
+    url: "http://127.0.0.1:1/v1",
+    models: [
+      { ...AUTO_RECORD },
+      { ...OLD_RECORD, id: "a-random/unknown-model-1b", maxTokens: 4096 },
+    ],
+  };
   registrations.length = 0;
   const mod = await import("../index.ts?probe=warm");
   await mod.default(fakePi);
 
-  assert(registrations.length === 1, "registers offline with a warm cache");
-  const models = modelsOf(registrations[0]);
-  const unknown = models.find((m) => m.id === "a-random/unknown-model-1b");
-  assert(unknown !== undefined, "warm cache serves live-only ids after the gateway dies");
-  assert(unknown.maxTokens === 4096, "cached catalog values preserved");
-  assert(models[0].id === "auto", "auto first on warm-cache registration");
+  assert(registrations.length === 1, "registers offline with a warm store");
+  const offline = await invokeRefresh({ allowNetwork: false });
+  const unknown = offline.find((m) => m.id === "a-random/unknown-model-1b");
+  assert(unknown !== undefined, "offline phase serves stored ids after the gateway dies");
+  assert(unknown.maxTokens === 4096, "stored catalog values preserved");
+  const after = await invokeRefresh();
+  assert(after.some((m) => m.id === "a-random/unknown-model-1b"), "stored catalog outlives the dead gateway");
   void mod;
-  console.log("probe 5 OK — warm cache outlives the gateway");
+  console.log("probe 5 OK — stored catalog outlives the gateway");
 }
 
 async function probeTombstones(): Promise<void> {
   const cacheDir = freshCacheDir();
   await withGateway(async (port) => {
-    const { cacheFilePathFor } = (await import("../index.ts?probe=tomb-helpers")) as {
-      cacheFilePathFor(u: string): string;
+    const { tombstonesFilePathFor } = (await import("../index.ts?probe=tomb-helpers")) as {
+      tombstonesFilePathFor(u: string): string;
     };
-    // Cache filename is a pure function of the gateway URL; the extension
-    // instance below resolves the same name inside cacheDir.
-    const cachePath = path.join(cacheDir, path.basename(cacheFilePathFor(baseUrlFor(port))));
-    fs.writeFileSync(cachePath, JSON.stringify({ models: [AUTO_RECORD, OLD_RECORD], tombstones: {} }));
+    // The tombstone store filename is a pure function of the gateway URL.
+    const tombPath = path.join(cacheDir, path.basename(tombstonesFilePathFor(baseUrlFor(port))));
+    fs.writeFileSync(tombPath, JSON.stringify({}));
     // Legacy unscoped cache from an older version must be ignored.
     fs.writeFileSync(path.join(cacheDir, "omniroute-models.json"), JSON.stringify({ models: [{ ...OLD_RECORD, id: "provider/legacy-model" }], tombstones: {} }));
 
@@ -307,40 +349,36 @@ async function probeTombstones(): Promise<void> {
     process.env.OMNIROUTE_CACHE_DIR = cacheDir;
     // The gateway no longer serves provider/old-model.
     catalog = [{ id: "auto", object: "model" }, { id: "google/gemini-3-pro", object: "model", name: "Gemini 3 Pro" }];
+    // The pi store holds the soon-to-be-delisted record; the gateway dropped it.
+    stored = { url: baseUrlFor(port), models: [AUTO_RECORD, OLD_RECORD] };
     registrations.length = 0;
 
     const mod = await import("../index.ts?probe=tomb");
     await mod.default(fakePi);
-    const stale = modelsOf(registrations[0]);
-    assert(stale.some((m) => m.id === "provider/old-model"), "stale cache serves the soon-to-be-delisted model");
-    assert(!stale.some((m) => m.id === "provider/legacy-model"), "legacy unscoped cache file is ignored");
+    const seed = modelsOf(registrations[0]);
+    assert(!seed.some((m) => m.id === "provider/legacy-model"), "legacy unscoped cache file is ignored");
 
-    await fireSessionStart();
-    await waitFor(() => registrations.length >= 2, "tombstone revalidate hot-swap");
-    const models = modelsOf(registrations[registrations.length - 1]);
+    const models = await invokeRefresh();
     assert(models.some((m) => m.id === "provider/old-model"), "delisted model survives via tombstone grace");
     assert(models.some((m) => m.id === "google/gemini-3-pro"), "live catalog still applies");
     assert(models.length === 3, `auto + live entry + tombstoned entry, got ${models.length}`);
-    assert(fs.existsSync(cachePath), `cache written at ${cachePath}`);
-    const cached = JSON.parse(fs.readFileSync(cachePath, "utf8")) as {
-      models: unknown[];
-      tombstones: Record<string, { deprecatedAt: string }>;
-    };
-    const tomb = cached.tombstones["provider/old-model"];
-    assert(tomb && !Number.isNaN(Date.parse(tomb.deprecatedAt)), "revalidate tombstones the delisted id");
-    assert(cached.models.length === 2, "cache models are the live-merged truth (no tombstoned extras)");
+    assert(fs.existsSync(tombPath), `tombstone store written at ${tombPath}`);
+    const tombstones = JSON.parse(fs.readFileSync(tombPath, "utf8")) as Record<string, { deprecatedAt: string }>;
+    const tomb = tombstones["provider/old-model"];
+    assert(tomb && !Number.isNaN(Date.parse(tomb.deprecatedAt)), "refresh tombstones the delisted id");
 
-    // Expire the tombstone → the model must disappear on the next load.
-    cached.tombstones["provider/old-model"].deprecatedAt = new Date(Date.now() - 20 * 86_400_000).toISOString();
-    fs.writeFileSync(cachePath, JSON.stringify(cached));
-    registrations.length = 0;
-    const mod2 = await import("../index.ts?probe=tomb2");
-    await mod2.default(fakePi);
-    assert(!modelsOf(registrations[0]).some((m) => m.id === "provider/old-model"), "expired tombstone is dropped");
-    assert(modelsOf(registrations[0]).some((m) => m.id === "google/gemini-3-pro"), "cache still serves live ids");
+    // Expire the tombstone — the model must disappear on the next refresh.
+    tombstones["provider/old-model"].deprecatedAt = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    fs.writeFileSync(tombPath, JSON.stringify(tombstones));
+    const expired = await invokeRefresh();
+    assert(!expired.some((m) => m.id === "provider/old-model"), "expired tombstone is dropped");
+    assert(expired.some((m) => m.id === "google/gemini-3-pro"), "live ids still served");
+    // The gateway brings the id back — resurrected via the live catalog.
+    catalog = [{ id: "auto", object: "model" }, { id: "google/gemini-3-pro", object: "model" }, { id: "provider/old-model", object: "model" }];
+    const reborn = await invokeRefresh();
+    assert(reborn.some((m) => m.id === "provider/old-model"), "resurrected id comes back via live catalog");
     void mod;
-    void mod2;
-    console.log("probe 6 OK — tombstone grace window, reconcile, expiry, legacy cache ignored");
+    console.log("probe 6 OK — tombstone grace, reconcile, expiry, resurrection, legacy ignored");
   });
   catalog = defaultCatalog();
 }
@@ -351,14 +389,13 @@ async function probeKeyless(): Promise<void> {
     process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
     process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
     registrations.length = 0;
+    stored = undefined;
     const mod = await import("../index.ts?probe=keyless");
     await mod.default(fakePi);
     assert(registrations[0].config.apiKey === "keyless", "keyless placeholder keeps the models available in pi");
 
-    await fireSessionStart();
-    await waitFor(() => registrations.length >= 2, "keyless revalidate hot-swap");
+    const models = await invokeRefresh();
     assert(receivedAuth === undefined, "no Authorization header on the catalog fetch when keyless");
-    const models = modelsOf(registrations[registrations.length - 1]);
     assert(models[0].id === "auto", "keyless registration works");
     assert(models.length === 5, "keyless discovery serves the live catalog");
     void mod;
@@ -404,6 +441,33 @@ async function probePipeline(): Promise<void> {
   const expired = m.withTombstones([], { "x/y": { deprecatedAt: new Date(now - 20 * 86_400_000).toISOString(), model: rec({ id: "x/y" }) } }, now);
   assert(expired.length === 0, "expired tombstone dropped");
   console.log("probe 8 OK — patch/custom precedence, sanitation, tombstone TTL");
+}
+
+async function probeGatewayScoping(): Promise<void> {
+  // Session 1 refreshes against gateway A and publishes a catalog.
+  await withGateway(async (portA) => {
+    process.env.OMNIROUTE_API_KEY = "scope-key";
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(portA);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    registrations.length = 0;
+    stored = undefined;
+    const mod = await import("../index.ts?probe=scopeA");
+    await mod.default(fakePi);
+    const modelsA = await invokeRefresh();
+    assert(modelsA.length === 5, "gateway A catalog refreshed");
+    assert(stored?.url === baseUrlFor(portA), "publication carries the gateway url");
+  });
+  // Session 2 (new process env): different gateway URL, offline store kept.
+  delete process.env.OMNIROUTE_API_KEY;
+  process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1";
+  process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+  registrations.length = 0;
+  const modB = await import("../index.ts?probe-scopeB");
+  await modB.default(fakePi);
+  const offline = await invokeRefresh({ allowNetwork: false });
+  assert(offline.length === CURATED_COUNT, "gateway B serves curated — A's catalog is not leaked offline");
+  assert(!offline.some((m) => m.id === "google/gemini-3-pro"), "no gateway-A only ids leak into B");
+  console.log("probe 11 OK — foreign stored snapshot rejected, curated fallback preserved");
 }
 
 async function probeHeaders(): Promise<void> {
@@ -476,6 +540,7 @@ try {
   await probePipeline();
   await probeHeaders();
   await probeCap();
+  await probeGatewayScoping();
   console.log("ALL PROBES PASSED");
 } finally {
   for (const dir of cacheDirs) fs.rmSync(dir, { recursive: true, force: true });

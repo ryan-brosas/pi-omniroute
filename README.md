@@ -54,14 +54,14 @@ Open the model picker (`/model`) and choose an OmniRoute model:
 | --- | --- | --- |
 | `OMNIROUTE_BASE_URL` | `http://localhost:20128/v1` | Gateway origin (remote host, custom port, https) |
 | `OMNIROUTE_API_KEY` | *(none — keyless)* | Dashboard → Endpoints → API key |
-| `OMNIROUTE_CACHE_DIR` | `<agent dir>/cache` | Where the merged catalog cache is written (useful for tests / sandboxed homes). The cache is keyed to the configured gateway — changing `OMNIROUTE_BASE_URL` starts a fresh catalog |
+| `OMNIROUTE_CACHE_DIR` | `<agent dir>/cache` | Where the delisted-model tombstone store is kept (the model catalog itself is cached by pi). Keyed to the configured gateway — changing `OMNIROUTE_BASE_URL` starts a fresh tombstone history |
 
 Keyless mode: pick `auto` — OmniRoute answers from the pre-wired free tiers; no token needed, and requests are sent **without** an `Authorization` header. For paid tiers, either export `OMNIROUTE_API_KEY` or run pi’s `/login` and enter the key for the `omniroute` provider (stored in `~/.pi/agent/auth.json`).
 
 ## How it works
 
 1. **Zero-latency startup** — the provider registers immediately from the disk cache ∪ the curated `models.json`; registration never awaits the network.
-2. **Background revalidation** — on `session_start` the extension re-fetches `{OMNIROUTE_BASE_URL}/models`, layers the result (live entries → curated fields → `patch.json` overrides → `custom-models.json` additions → tombstoned ids on a 14-day grace), writes the merged catalog to the disk cache, and hot-swaps the registration — new models appear on later sessions without a pi restart.
+2. **Platform-native refresh** — the extension implements `ProviderConfig.refreshModels`: pi owns the cadence, the persisted catalog store (`publish({persist})`), and offline/cache-only phases (`allowNetwork`). Each refresh layers live `/v1/models` → curated fields → `patch.json` → `custom-models.json` → tombstoned ids (14-day grace) and hot-swaps the registration.
 3. **Fallback** — with no cache and an unreachable gateway, the curated fallback keeps the provider registered.
 
 Each live entry gets metadata (reasoning / vision / context limits) via id heuristics; curated `models.json` fields win per id, and `auto` is always listed first. Catalog errors are non-fatal — a failing fetch never blocks pi startup.
