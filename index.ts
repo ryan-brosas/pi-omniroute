@@ -65,17 +65,89 @@ const baseUrl = (envValue("OMNIROUTE_BASE_URL") || DEFAULT_BASE_URL).replace(/\/
 
 // ---- Model scope ------------------------------------------------------------
 // Which catalog the provider registers. The live gateway advertises every
-// routable id (350+); the curated floor is what this package hand-verified.
-//   curated (default) — only models.json + custom-models.json + patches
-//   routes            — only the auto router + auto/* routes
-//   all               — the full live /v1/models catalog (previous behavior)
-type ModelScope = "curated" | "routes" | "all";
+// routable id (500+), and /v1/models exposes no credential/availability info.
+//   active (default) — live ids backed by an active gateway connection
+//                      (dashboard /api/providers), unioned with the curated
+//                      floor; falls back to the floor when the dashboard API
+//                      is unavailable
+//   curated          — the static verified floor only (fully offline)
+//   routes           — only the auto router + auto/* routes
+//   all              — the full live /v1/models catalog (previous behavior)
+type ModelScope = "active" | "curated" | "routes" | "all";
 const MODEL_SCOPE: ModelScope = (() => {
   const raw = envValue("OMNIROUTE_MODEL_SCOPE").trim().toLowerCase();
-  return raw === "routes" || raw === "all" ? raw : "curated";
+  return raw === "curated" || raw === "routes" || raw === "all" ? raw : "active";
 })();
 
 const isRouteId = (id: string) => id === "auto" || id.startsWith("auto/");
+const prefixOf = (id: string) => id.split("/")[0] ?? id;
+
+// Dashboard origin for the connections API: the gateway serves /v1 and the
+// dashboard from the same origin.
+const DASHBOARD_URL = baseUrl.replace(/\/v1$/, "");
+
+/**
+ * OmniRoute's canonical provider-to-catalog aliases: a standard connection
+ * row whose `provider` field routes models under a different catalog prefix
+ * (verified against the gateway catalog — a claude connection serves cc/*).
+ */
+const PROVIDER_CATALOG_ALIASES: Record<string, string> = { claude: "cc" };
+
+/**
+ * Prefixes with an enabled backing connection. The connections payload
+ * carries masked keys — only isActive, provider, and
+ * providerSpecificData.prefix are read, nothing is persisted. Returns null
+ * when the dashboard API is unavailable (older gateway, auth-protected) or
+ * no connection is enabled: callers then degrade to the curated floor
+ * instead of guessing.
+ */
+async function fetchActivePrefixes(
+  apiKey: string | undefined,
+  signal?: AbortSignal,
+): Promise<Set<string> | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      const response = await fetch(`${DASHBOARD_URL}/api/providers`, {
+        headers,
+        signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+      });
+      if (!response.ok) return null;
+      const payload = (await response.json()) as { connections?: unknown } | null;
+      const connections = payload && Array.isArray(payload.connections) ? payload.connections : [];
+      const prefixes = new Set<string>();
+      for (const raw of connections) {
+        if (!raw || typeof raw !== "object") continue;
+        const connection = raw as {
+          isActive?: unknown;
+          provider?: unknown;
+          providerSpecificData?: { prefix?: unknown } | null;
+        };
+        if (connection.isActive === false) continue; // disabled; transient backoff still counts
+        // Compatible connections namespace their models under
+        // providerSpecificData.prefix; standard API-key/OAuth rows identify
+        // via the top-level provider field (mapped through the canonical
+        // provider-to-catalog aliases, e.g. claude -> cc). Collect all.
+        const psdPrefix = connection.providerSpecificData?.prefix;
+        if (typeof psdPrefix === "string" && psdPrefix.trim()) prefixes.add(psdPrefix.trim());
+        if (typeof connection.provider === "string" && connection.provider.trim()) {
+          const provider = connection.provider.trim();
+          prefixes.add(provider);
+          const alias = PROVIDER_CATALOG_ALIASES[provider];
+          if (alias) prefixes.add(alias);
+        }
+      }
+      return prefixes.size > 0 ? prefixes : null;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return null; // dashboard API unavailable -- degrade to the curated floor
+  }
+}
 
 function scopedBuild(now = Date.now()): ModelRecord[] {
   // Static build: no live catalog, no store, no tombstones (those only exist
@@ -157,8 +229,12 @@ function saveTombstones(tombstones: Tombstones): void {
  */
 function readStoredModels(stored: unknown): ModelRecord[] {
   if (!stored || typeof stored !== "object") return [];
-  const entry = stored as { models?: unknown; url?: unknown };
-  if (entry.url !== baseUrl) return [];
+  const entry = stored as { models?: unknown; url?: unknown; scope?: unknown };
+  // Snapshots are gateway- AND scope-scoped: a catalog persisted under a
+  // different scope must not leak across (e.g. an upgrade from a pre-scope
+  // all-scope snapshot — no scope field — must not flood the new active
+  // default). Mismatched snapshots degrade to the curated floor.
+  if (entry.url !== baseUrl || entry.scope !== MODEL_SCOPE) return [];
   return Array.isArray(entry.models)
     ? entry.models.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
     : [];
@@ -269,6 +345,17 @@ function registerModels(pi: ExtensionAPI, models: ModelRecord[]): void {
   });
 }
 
+/**
+ * Union the curated floor into a live-derived base (active scope): verified
+ * ids stay visible even when the live catalog doesn't advertise them. Fields
+ * of overlapping ids were already merged by mergeCatalogs.
+ */
+function unionCuratedFloor(base: ModelRecord[]): ModelRecord[] {
+  const seen = new Set(base.map((m) => m.id));
+  const extras = curated.filter((m) => !seen.has(m.id));
+  return extras.length > 0 ? [...base, ...extras] : base;
+}
+
 /** Startup seed: curated core, no network. Tombstones keep grace from disk. */
 function seedModels(now = Date.now()): ModelRecord[] {
   return MODEL_SCOPE === "all" ? buildModels(curated, custom, patch, loadTombstones(), now) : scopedBuild(now);
@@ -282,25 +369,38 @@ async function refreshFor(
   pi: ExtensionAPI,
   context: RefreshModelsContext,
 ): Promise<ProviderModelConfig[]> {
-  // Scoped modes are static: the curated floor needs no network, no store,
-  // and no re-registration (pi's registration hook fires an offline refresh —
+  const now = Date.now();
+  const tombstonesFor = () => (MODEL_SCOPE === "all" ? loadTombstones() : {});
+  // Static scopes (curated / routes): no network, no store, and no
+  // re-registration (pi's registration hook fires an offline refresh —
   // registering again here would loop). The returned list replaces the
   // extension models via the composed refresh wrapper.
-  if (MODEL_SCOPE !== "all") return scopedBuild();
+  if (MODEL_SCOPE !== "active" && MODEL_SCOPE !== "all") return scopedBuild(now);
   const apiKey = effectiveApiKey(context);
   const stored = readStoredModels(context.stored);
   if (!context.allowNetwork) {
     // Cache-only phase: serve the persisted catalog without any fetch.
-    return buildModels(stored.length > 0 ? stored : curated, custom, patch, loadTombstones());
+    return buildModels(stored.length > 0 ? stored : curated, custom, patch, tombstonesFor(), now);
   }
-  const now = Date.now();
   const live = await fetchLiveCatalog(apiKey, context.signal);
   if (live && live.length > 0) {
-    const base = mergeCatalogs(live, curated);
-    const tombstones = reconcileTombstones(stored, loadTombstones(), base, now);
-    saveTombstones(tombstones);
+    // Active scope: a visibility cut — keep the auto routes and ids whose
+    // connection prefix is active (/api/providers). The gateway routes by
+    // model name, so this is a picker cut, not a resolvability claim; ids
+    // outside it still work via a custom model id. The curated floor is
+    // always unioned in. Without a dashboard API, degrade to the floor.
+    const prefixes = MODEL_SCOPE === "active" ? await fetchActivePrefixes(apiKey, context.signal) : null;
+    const visible =
+      MODEL_SCOPE === "active"
+        ? prefixes
+          ? live.filter((m) => isRouteId(m.id) || prefixes.has(prefixOf(m.id)))
+          : live.filter((m) => isRouteId(m.id))
+        : live;
+    const base = MODEL_SCOPE === "active" ? unionCuratedFloor(mergeCatalogs(visible, curated)) : mergeCatalogs(visible, curated);
+    const tombstones = MODEL_SCOPE === "all" ? reconcileTombstones(stored, loadTombstones(), base, now) : {};
+    if (MODEL_SCOPE === "all") saveTombstones(tombstones);
     const models = buildModels(base, custom, patch, tombstones, now);
-    const entry = { models: base, checkedAt: now, url: baseUrl } as unknown as ModelsStoreEntry;
+    const entry = { models: base, checkedAt: now, url: baseUrl, scope: MODEL_SCOPE } as unknown as ModelsStoreEntry;
     try {
       await context.publish({
         persist: entry,
@@ -316,7 +416,7 @@ async function refreshFor(
   }
   // Gateway unreachable / empty: keep the current catalog, no store mutation.
   const fallback = stored.length > 0 ? stored : curated;
-  const models = buildModels(fallback, custom, patch, loadTombstones(), now);
+  const models = buildModels(fallback, custom, patch, tombstonesFor(), now);
   registerModels(pi, models);
   return models;
 }
