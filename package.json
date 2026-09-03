@@ -1,6 +1,6 @@
 {
   "name": "pi-omniroute",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "OmniRoute provider extension for pi — one self-hosted gateway endpoint routing 350+ AI providers (Claude, GPT, Gemini, Kimi, GLM, DeepSeek, MiniMax, …) with free tiers, quota-aware auto-fallback, and token compression.",
@@ -10,7 +10,8 @@
     "build": "echo 'nothing to build'",
     "check": "bun scripts/check.ts",
     "test": "bun tests/probe.ts",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "verify": "bun run check && bun run test && bun run typecheck"
   },
   "keywords": [
     "pi",
