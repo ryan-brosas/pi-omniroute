@@ -110,5 +110,526 @@
     "compat": {
       "supportsReasoningEffort": true
     }
+  },
+  {
+    "id": "auto/best-coding",
+    "name": "Auto · Best coding",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/best-reasoning",
+    "name": "Auto · Best reasoning",
+    "reasoning": true,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "auto/best-fast",
+    "name": "Auto · Best fast",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/best-vision",
+    "name": "Auto · Best vision",
+    "reasoning": false,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/best-chat",
+    "name": "Auto · Best chat",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/best-coding-fast",
+    "name": "Auto · Best coding (fast)",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/pro-coding",
+    "name": "Auto · Pro coding",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/pro-reasoning",
+    "name": "Auto · Pro reasoning",
+    "reasoning": true,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "auto/pro-vision",
+    "name": "Auto · Pro vision",
+    "reasoning": false,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/pro-chat",
+    "name": "Auto · Pro chat",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/pro-fast",
+    "name": "Auto · Pro fast",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/coding",
+    "name": "Auto · Coding",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/fast",
+    "name": "Auto · Fast",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/chat",
+    "name": "Auto · Chat",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/cheap",
+    "name": "Auto · Cheap",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/offline",
+    "name": "Auto · Offline",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/smart",
+    "name": "Auto · Smart",
+    "reasoning": true,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "auto/claude-opus",
+    "name": "Auto · Claude Opus",
+    "reasoning": true,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "auto/claude-sonnet",
+    "name": "Auto · Claude Sonnet",
+    "reasoning": true,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "auto/best-free",
+    "name": "Auto · Best free",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/best-chaos",
+    "name": "Auto · Best chaos",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/chaos",
+    "name": "Auto · Chaos",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/coding:fast",
+    "name": "Auto · Coding (fast)",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/coding:cheap",
+    "name": "Auto · Coding (cheap)",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/coding:free",
+    "name": "Auto · Coding (free)",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/coding:pro",
+    "name": "Auto · Coding (pro)",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/coding:reliable",
+    "name": "Auto · Coding (reliable)",
+    "reasoning": false,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/reasoning",
+    "name": "Auto · Reasoning",
+    "reasoning": true,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "auto/reasoning:pro",
+    "name": "Auto · Reasoning (pro)",
+    "reasoning": true,
+    "input": [
+      "text"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000,
+    "compat": {
+      "supportsReasoningEffort": true
+    }
+  },
+  {
+    "id": "auto/vision",
+    "name": "Auto · Vision",
+    "reasoning": false,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
+  },
+  {
+    "id": "auto/multimodal",
+    "name": "Auto · Multimodal",
+    "reasoning": false,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0
+    },
+    "contextWindow": 200000,
+    "maxTokens": 16384
   }
 ]

@@ -9,6 +9,9 @@
  */
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import fs from "node:fs";
+import fallbackModels from "../models.json" with { type: "json" };
+
+const CURATED_COUNT = (fallbackModels as unknown[]).length;
 import os from "node:os";
 import path from "node:path";
 
@@ -151,7 +154,7 @@ async function probeLive(): Promise<void> {
     assert(config.api === "openai-completions", "api is openai-completions");
     assert(config.apiKey === "$OMNIROUTE_API_KEY", "apiKey env-ref set");
     const stale = modelsOf(registrations[0]);
-    assert(stale.length === 6, `stale registration = curated fallback, got ${stale.length}`);
+    assert(stale.length === CURATED_COUNT, `stale registration = curated fallback, got ${stale.length}`);
     assert(stale[0].id === "auto", "auto first on stale registration");
 
     // session_start revalidates in the background and hot-swaps.
@@ -259,7 +262,7 @@ async function probeOfflineCold(): Promise<void> {
 
   assert(registrations.length === 1, "still registers provider offline");
   const models = modelsOf(registrations[0]);
-  assert(models.length === 6, `offline fallback = curated list, got ${models.length}`);
+  assert(models.length === CURATED_COUNT, `offline fallback = curated list, got ${models.length}`);
   assert(models[0].id === "auto", "auto first offline");
   void mod;
   console.log("probe 4 OK — unreachable gateway + no cache → curated fallback");
