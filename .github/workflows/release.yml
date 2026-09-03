@@ -3,6 +3,7 @@ name: release
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -34,8 +35,32 @@ jobs:
           path: dist/*.tgz
           if-no-files-found: error
           retention-days: 90
-  # Stable GitHub Releases + npm publishes are owned by npm-publish.yml
-  # (single trusted publisher): gh workflow run npm-publish.yml -f version=x.y.z
+
+  stable:
+    name: Stable release (v* tag)
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pi-omniroute-tarball
+          path: pi-omniroute-tarball
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: pi-omniroute ${{ github.ref_name }}
+          body: |
+            Automated GitHub Release for ${{ github.ref_name }}, produced by the
+            release workflow from a verified build (bun run verify). The attached
+            tarball is the same artifact that npm publishes.
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: pi-omniroute-tarball/*.tgz
+          fail_on_unmatched_files: true
 
   # npm publish is owned by npm-publish.yml (single trusted publisher per
   # package): trigger it with `gh workflow run npm-publish.yml` after tagging.
