@@ -1,0 +1,50 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+title: "[Bug] "
+labels: [bug, triage]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in the fields below;
+        issues without reproduction steps get closed faster than the reporter expects.
+  - type: input
+    id: version
+    attributes:
+      label: Revision / tag
+      description: Commit sha or tag of pi-omniroute you are running
+      placeholder: "e.g. 0.2.0 or main@abc1234"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: pi version, OS, how the gateway runs (npm/bun/pnpm/Docker), OMNIROUTE_BASE_URL (defaults are fine)
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands / /model selection path — a failing test or repro script is ideal
+      placeholder: |
+        1. omriroute on :20128
+        2. pi -e /path/to/pi-omniroute
+        3. /model → select "auto/best-reasoning"
+        4. observe …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What did you expect, and what happened instead? Include error text.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: logs (redact any keys!), screenshots, related issues

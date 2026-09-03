@@ -1,0 +1,42 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- `auto/*` built-in router ids to the curated fallback (`models.json`): the full
+  upstream-verified `AUTO_TEMPLATE_VARIANTS` + `AUTO_SUFFIX_VARIANTS` set
+  (`auto/best-coding`, `auto/reasoning:pro`, `auto/vision`, …), so the offline
+  model picker still offers the OmniRoute routes that /v1/models advertises.
+- `bun verify` script — runs the shape gate, the behavioral probe, and the typecheck
+  in one shot.
+- Repository hygiene: `CONTRIBUTING.md`, `SECURITY.md`, PR/issue templates,
+  `.editorconfig`, `.gitattributes`.
+- `pr-quality.yml` workflow — the [peakoss/anti-slop](https://github.com/peakoss/anti-slop)
+  action (pinned v0.3.0) flags low-quality / AI-slop pull requests.
+- Dependabot now also tracks `package.json` (`npm` ecosystem, Bun lockfile),
+  grouped into a single `js` PR.
+
+### Changed
+
+- `tests/probe.ts` derives the offline-fallback size from `models.json` instead of a
+  hard-coded count, so curated additions no longer break the probe.
+- Package version 0.2.0.
+
+## [0.1.0] - 2025-09-03
+
+Initial public release.
+
+### Added
+
+- OmniRoute provider registration (`omniroute`), keyless `auto` model, curated fallback.
+- Stale-while-revalidate catalog: zero-latency registration, session_start refresh,
+  per-url disk cache, tombstone grace window for delisted models, right-size cap.
+- Metadata heuristics (reasoning / vision / context limits) + curated merge layers
+  (`models.json`, `patch.json`, `custom-models.json`).
+- Quality gate CI (check / test / typecheck) with a required-merge job,
+  dependabot for GitHub Actions, MIT license.
