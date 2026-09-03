@@ -77,7 +77,7 @@ jobs:
           name: pi-omniroute-tarball
           path: pi-omniroute-tarball
       - name: Publish the verified tarball to npm
-        run: npm publish pi-omniroute-tarball/*.tgz --provenance --access public
+        run: npm publish ./pi-omniroute-tarball/*.tgz --provenance --access public
 
   continuous:
     name: Continuous build (main push)
