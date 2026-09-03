@@ -76,6 +76,11 @@ jobs:
         with:
           name: pi-omniroute-tarball
           path: pi-omniroute-tarball
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0 (OIDC-capable npm)
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
       - name: Publish the verified tarball to npm
         run: npm publish ./pi-omniroute-tarball/*.tgz --provenance --access public
 
