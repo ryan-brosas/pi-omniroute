@@ -9,8 +9,11 @@ gateway as an OpenAI-compatible provider via `pi.registerProvider("omniroute", �
 
 | File | Role |
 | --- | --- |
-| `index.ts` | Extension factory. Live catalog fetch (`/v1/models`), heuristic metadata (`inferMetadata`), curated merge (`mergeCatalogs`), registration. |
-| `models.json` | **Curated fallback** list used when the gateway is unreachable. Hand-maintained — add entries only for real, verified ids. |
+| `index.ts` | Extension factory. Stale-while-revalidate catalog: disk cache, live fetch (`/v1/models`), tombstone reconciliation, registration. |
+| `models.ts` | Pure model pipeline (heuristics, transform, merge, patch/custom/tombstone layers) — offline-testable, no pi runtime or fs. |
+| `models.json` | **Curated fallback** floor for when the gateway is unreachable and no cache exists. Hand-maintained — add entries only for real, verified ids. |
+| `patch.json` | Per-model corrections (reasoning / vision / names / limits / cost) applied on top of the live catalog. Never creates ids. |
+| `custom-models.json` | Complete records for ids the gateway does not advertise; replaces same-id base entries wholesale. |
 | `scripts/check.ts` | Offline validation gate (`bun scripts/check.ts`). |
 | `README.md` | User docs. Keep the quickstart and env-var table in sync with code defaults. |
 
@@ -19,7 +22,7 @@ gateway as an OpenAI-compatible provider via `pi.registerProvider("omniroute", �
 - **Never break keyless mode.** `auto` must resolve without `OMNIROUTE_API_KEY`; the auth header is only added when a key exists.
 - **Discovery is best-effort.** Catalog fetches must never throw out of the factory; always fall back to the curated list.
 - **Metadata stays honest.** Vision/thinking for unknown ids comes only from `VISION_HINTS` / `REASONING_HINTS`. Prefer `supportsReasoningEffort: true` (OpenAI-style) over exotic `thinkingFormat` values — the gateway is an OpenAI-compatible front.
-- **Curated merge is field-level.** Live catalog wins for existence; curated wins per-field for reasoning / vision / names / output limits.
+- **Curated merge is field-level.** Live catalog wins for existence; curated wins per-field for reasoning / vision / names / output limits. Hand edits go to `patch.json` (corrections, wins over everything per-field) and `custom-models.json` (extra ids); `models.json` is the offline floor. Tombstones keep recently-delisted ids alive for 14 days (cache file, runtime-written).
 - **Right-size the catalog.** `MAX_LIVE_CATALOG_ENTRIES` caps registered models at 1000.
 
 ## Verification

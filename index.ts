@@ -12,16 +12,19 @@
  *
  *   Base URL    http://localhost:20128/v1   (override with OMNIROUTE_BASE_URL)
  *   Auth        Authorization: Bearer <dashboard key>   (optional, keyless "auto")
- *   Models      live catalog from {base}/models, merged with curated models.json
+ *   Models      stale-while-revalidate catalog (see below)
  *
- * Model discovery (best-effort, never fatal):
- *   1. Startup  – fetch the live catalog. On success, curated metadata from
- *                 models.json is merged on top (names / vision / reasoning /
- *                 output limits that the catalog does not reliably report).
- *   2. Fallback  – if the gateway is down or keyless /models is denied, register
- *                 the small curated fallback list so the provider still exists.
- *   3. Refresh   – session_start re-fetches the catalog so newly added models
- *                 appear on subsequent sessions without restarting pi.
+ * Model discovery (stale-while-revalidate, best-effort, never fatal):
+ *   1. Startup  – register immediately from the disk cache ∪ curated
+ *                 models.json. Zero latency: registration never awaits the
+ *                 network, so the model picker is ready instantly.
+ *   2. Refresh  – session_start re-fetches {base}/models in the background
+ *                 and hot-swaps the registration. The merged catalog is
+ *                 layered live → curated fields → patch.json →
+ *                 custom-models.json → tombstoned ids (14-day grace), then
+ *                 written to the disk cache for the next session.
+ *   3. Fallback – with no cache and an unreachable gateway, the curated
+ *                 fallback list keeps the provider registered.
  *
  * Usage:
  *   npm i -g omniroute && omniroute        # run the gateway (port 20128)
@@ -30,17 +33,37 @@
  *   /model → "auto" or e.g. "claude/claude-sonnet-4-6"
  */
 import {
+  getAgentDir,
   type ExtensionAPI,
   type ProviderConfig,
-  type ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
+import fs from "node:fs";
+import path from "node:path";
 import fallbackModelsData from "./models.json" with { type: "json" };
+import customModelsData from "./custom-models.json" with { type: "json" };
+import patchData from "./patch.json" with { type: "json" };
+import {
+  asModelRecord,
+  buildModels,
+  mergeCatalogs,
+  transformCatalogModel,
+  type CatalogEntry,
+  type ModelRecord,
+  type PatchData,
+  type Tombstones,
+} from "./models.ts";
+
+// Public pipeline surface (used by scripts/check.ts and tests/probe.ts).
+export { inferMetadata, transformCatalogModel, mergeCatalogs } from "./models.ts";
 
 const PROVIDER_ID = "omniroute";
 const PROVIDER_NAME = "OmniRoute";
 const DEFAULT_BASE_URL = "http://localhost:20128/v1";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_LIVE_CATALOG_ENTRIES = 1000;
+// pi hides models without configured auth. OmniRoute accepts this placeholder
+// for keyless routes; a stored /login credential still takes precedence.
+const KEYLESS_API_KEY = "keyless";
 
 function envValue(name: string): string {
   return typeof process !== "undefined" ? (process.env[name] ?? "") : "";
@@ -49,86 +72,83 @@ function envValue(name: string): string {
 /** Gateway origin, normalized without a trailing slash. */
 const baseUrl = (envValue("OMNIROUTE_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
 
-// ─── Catalog / /v1/models payload types ───────────────────────────────────────
+// ─── Hand-edit layers ─────────────────────────────────────────────────────────
 
-interface CatalogEntry {
-  id?: unknown;
-  name?: unknown;
-  context_length?: unknown;
-  max_tokens?: unknown;
-  max_completion_tokens?: unknown;
+const curated = fallbackModelsData as ModelRecord[];
+const custom = (customModelsData as ModelRecord[]).filter((m) => !!m?.id);
+const patch = patchData as PatchData;
+
+// ─── Disk cache (stale-while-revalidate) ──────────────────────────────────────
+
+interface CacheFile {
+  /** Last successfully merged live catalog (without customs/tombstoned extras). */
+  models: ModelRecord[];
+  /** Ids the gateway dropped, kept for a grace window with their last record. */
+  tombstones: Tombstones;
+}
+
+const CACHE_DIR =
+  envValue("OMNIROUTE_CACHE_DIR").trim() || path.join(getAgentDir(), "cache");
+const CACHE_PATH = path.join(CACHE_DIR, "omniroute-models.json");
+
+function sanitizeTombstones(value: unknown): Tombstones {
+  const out: Tombstones = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [id, tombstone] of Object.entries(value as Record<string, unknown>)) {
+    if (!id || !tombstone || typeof tombstone !== "object") continue;
+    const t = tombstone as { deprecatedAt?: unknown; model?: unknown };
+    if (typeof t.deprecatedAt !== "string") continue;
+    const model = asModelRecord(t.model);
+    if (model) out[id] = { deprecatedAt: t.deprecatedAt, model };
+  }
+  return out;
+}
+
+function loadCache(): CacheFile | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const raw = parsed as { models?: unknown; tombstones?: unknown };
+    const models = Array.isArray(raw.models)
+      ? raw.models.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
+      : [];
+    const tombstones = sanitizeTombstones(raw.tombstones);
+    if (models.length === 0 && Object.keys(tombstones).length === 0) return null;
+    return { models, tombstones };
+  } catch {
+    return null; // missing/corrupt cache — degrade to the curated fallback
+  }
+}
+
+function saveCache(models: ModelRecord[], tombstones: Tombstones): void {
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(CACHE_PATH, JSON.stringify({ models, tombstones }, null, 2) + "\n");
+  } catch {
+    /* non-fatal: an unwritable cache only costs next-session freshness */
+  }
+}
+
+/** Cache ∪ curated — a stale cache must not hide newly curated models. */
+function loadStaleModels(cache: CacheFile | null): ModelRecord[] {
+  if (!cache) return [...curated];
+  const merged = new Map(cache.models.map((m) => [m.id, m]));
+  for (const model of curated) {
+    if (!merged.has(model.id)) merged.set(model.id, model);
+  }
+  return [...merged.values()];
 }
 
 // ─── Model metadata heuristics ────────────────────────────────────────────────
-// The gateway's /v1/models does not reliably report reasoning or vision for
-// every entry; providers expose ids both bare ("gemini-2.5-pro") and prefixed
-// ("google/gemini-3-pro"). These lists classify the *stem* of the id.
-
-const REASONING_HINTS = [
-  "claude-opus", "claude-sonnet", "claude-haiku", "claude-3-7", "claude-3-5",
-  "gpt-5", "o1-", "o3-", "o4-",
-  "gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash-thinking",
-  "deepseek-r1", "qwq", "kimi-k3", "glm-5", "grok-4", "grok-3",
-];
-const VISION_HINTS = [
-  "claude-", "gpt-", "gemini-",
-  "qwen3-vl", "qwen-2.5-vl", "qwen2.5-vl",
-  "glm-4.5v", "glm-4.6v", "glm-5", "kimi-k", "kimi-k3", "grok-",
-  "pixtral", "llama-3.2-", "llama-4", "minimax",
-];
-
-function idStem(id: string): string {
-  return (id.split("/").pop() ?? id).toLowerCase();
-}
-
-/**
- * Heuristic metadata for a catalog model not present in the curated fallback.
- * Kept deliberately conservative: reasoning is only claimed for ids whose
- * family is known to support it; vision only for known vision families.
- */
-export function inferMetadata(
-  id: string,
-): Pick<ProviderModelConfig, "reasoning" | "input" | "contextWindow" | "maxTokens"> {
-  const stem = idStem(id);
-  const reasoning = REASONING_HINTS.some((hint) => stem.includes(hint));
-  const vision = VISION_HINTS.some((hint) => stem.includes(hint));
-  const gemini = stem.includes("gemini-2.5") || stem.includes("gemini-3");
-  return {
-    reasoning,
-    input: vision ? ["text", "image"] : ["text"],
-    contextWindow: gemini ? 1_000_000 : 200_000,
-    maxTokens: reasoning ? 64_000 : 32_768,
-  };
-}
-
-/** Transform one entry of the gateway /v1/models response. */
-export function transformCatalogModel(entry: CatalogEntry): ProviderModelConfig | null {
-  if (typeof entry?.id !== "string" || !entry.id) return null;
-  const id = entry.id;
-  const metadata = inferMetadata(id);
-  const name = typeof entry?.name === "string" && entry.name.trim() ? entry.name : id;
-  return {
-    id,
-    name,
-    ...metadata,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    compat: metadata.reasoning
-      ? { supportsReasoningEffort: true } // OpenAI-style reasoning_effort; gateway translates per backend
-      : undefined,
-  };
-}
-
-function asNumber(value: unknown, fallback: number): number {
-  const n = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
+// (moved to models.ts; inferMetadata/transformCatalogModel/mergeCatalogs are
+// re-exported above for scripts/check.ts and tests/probe.ts)
 
 // ── Fetching the live catalog ─────────────────────────────────────────────────
 
 async function fetchLiveCatalog(
   apiKey: string | undefined,
   signal?: AbortSignal
-): Promise<ProviderModelConfig[] | null> {
+): Promise<ModelRecord[] | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -147,18 +167,13 @@ async function fetchLiveCatalog(
       if (!Array.isArray(entries) || entries.length === 0) return null;
 
       const seen = new Set<string>();
-      const models: ProviderModelConfig[] = [];
+      const models: ModelRecord[] = [];
       for (const raw of entries) {
         const entry = raw as CatalogEntry;
         const id = typeof entry?.id === "string" ? entry.id : "";
         if (!id || seen.has(id)) continue;
         const model = transformCatalogModel(entry);
         if (!model) continue;
-        // Keep catalog-provided context/max tokens when present.
-        if (entry.context_length !== undefined || entry.max_tokens !== undefined || entry.max_completion_tokens !== undefined) {
-          model.contextWindow = asNumber(entry.context_length, model.contextWindow);
-          model.maxTokens = asNumber(entry.max_tokens ?? entry.max_completion_tokens, model.maxTokens);
-        }
         seen.add(id);
         models.push(model);
         if (models.length >= MAX_LIVE_CATALOG_ENTRIES) break;
@@ -172,66 +187,75 @@ async function fetchLiveCatalog(
   }
 }
 
-// ── Merge curated fallback on top of the live catalog ─────────────────────────
+// ─── Tombstone reconciliation ─────────────────────────────────────────────────
 
-function applyCurated(model: ProviderModelConfig, curated: ProviderModelConfig): ProviderModelConfig {
-  return {
-    ...model,
-    name: curated.name ?? model.name,
-    reasoning: curated.reasoning ?? model.reasoning,
-    input: curated.input ?? model.input,
-    contextWindow: curated.contextWindow ?? model.contextWindow,
-    maxTokens: curated.maxTokens ?? model.maxTokens,
-    cost: curated.cost ?? model.cost,
-    compat: curated.compat ?? model.compat,
-  };
-}
-
-/** Live catalog is authoritative; curated metadata wins field-by-field; "auto" first. */
-export function mergeCatalogs(
-  live: ProviderModelConfig[],
-  curated: ProviderModelConfig[],
-): ProviderModelConfig[] {
-  const byId = new Map<string, ProviderModelConfig>();
-  for (const model of live) {
-    const curatedById = curated.find((m) => m.id === model.id);
-    byId.set(model.id, curatedById ? applyCurated(model, curatedById) : model);
+/**
+ * Tombstone ids the live catalog dropped; resurrect ids it brought back.
+ * The deprecatedAt clock never resets while a model stays delisted.
+ */
+function reconcileTombstones(prev: CacheFile | null, merged: ModelRecord[], now: number): Tombstones {
+  const live = new Set(merged.map((m) => m.id));
+  const next: Tombstones = {};
+  for (const [id, tombstone] of Object.entries(prev?.tombstones ?? {})) {
+    if (!live.has(id)) next[id] = tombstone;
   }
-  // The live gateway is authoritative for which models exist. Only the
-  // "auto" router entry is guaranteed when live omits it.
-  const auto = curated.find((m) => m.id === "auto");
-  if (auto && !byId.has("auto")) byId.set("auto", auto);
-  const ids = [...byId.keys()].sort((a, b) => (a === "auto" ? -1 : b === "auto" ? 1 : 0));
-  return ids.map((id) => byId.get(id)!);
+  for (const model of prev?.models ?? []) {
+    if (!live.has(model.id) && !next[model.id]) {
+      next[model.id] = { deprecatedAt: new Date(now).toISOString(), model };
+    }
+  }
+  return next;
 }
 
-// ── Registration ──────────────────────────────────────────────────────────────
-
-function registerProvider(pi: ExtensionAPI, models: ProviderModelConfig[]): void {
-  const config: ProviderConfig = {
-    name: PROVIDER_NAME,
-    baseUrl,
-    apiKey: "$OMNIROUTE_API_KEY",
-    api: "openai-completions",
-    models,
-  };
-  pi.registerProvider(PROVIDER_ID, config);
-}
+// ─── Registration ─────────────────────────────────────────────────────────────
 
 function resolveApiKey(): string | undefined {
   const key = envValue("OMNIROUTE_API_KEY").trim();
   return key || undefined;
 }
 
-export default async function (pi: ExtensionAPI): Promise<void> {
-  const fallback = fallbackModelsData as ProviderModelConfig[];
+// One config factory so the streaming config and the model list never desync.
+function makeProviderConfig(models: ModelRecord[]): ProviderConfig {
+  return {
+    name: PROVIDER_NAME,
+    baseUrl,
+    apiKey: resolveApiKey() ? "$OMNIROUTE_API_KEY" : KEYLESS_API_KEY,
+    api: "openai-completions",
+    models,
+  };
+}
 
-  // 1. Startup discovery — pi waits for the factory, so the provider is ready
-  //    for the model picker before the interactive session begins.
-  const live = await fetchLiveCatalog(resolveApiKey());
-  registerProvider(pi, live && live.length > 0 ? mergeCatalogs(live, fallback) : [...fallback]);
+/** Register base ∪ custom ∪ patch ∪ tombstones. */
+function registerCatalog(pi: ExtensionAPI, base: ModelRecord[], tombstones: Tombstones): void {
+  pi.registerProvider(PROVIDER_ID, makeProviderConfig(buildModels(base, custom, patch, tombstones)));
+}
 
-  // 2. Refresh on later sessions (gateway may have come online, added models,
+interface Revalidated {
+  base: ModelRecord[];
+  tombstones: Tombstones;
+}
+
+async function revalidate(
+  signal: AbortSignal,
+  prev: CacheFile | null,
+  now = Date.now(),
+): Promise<Revalidated | null> {
+  const live = await fetchLiveCatalog(resolveApiKey(), signal);
+  if (!live || live.length === 0) return null;
+  const base = mergeCatalogs(live, curated);
+  const tombstones = reconcileTombstones(prev, base, now);
+  saveCache(base, tombstones);
+  return { base, tombstones };
+}
+
+export default function (pi: ExtensionAPI): void {
+  const cache = loadCache();
+
+  // 1. Zero-latency startup — serve stale (cache ∪ curated) immediately;
+  //    registration never awaits the network.
+  registerCatalog(pi, loadStaleModels(cache), cache?.tombstones ?? {});
+
+  // 2. Refresh on session start (gateway may have come online, added models,
   //    or had its catalog regenerated between sessions).
   let refreshAbort: AbortController | null = null;
   pi.on("session_start", async () => {
@@ -239,12 +263,12 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     const controller = new AbortController();
     refreshAbort = controller;
     try {
-      const fresh = await fetchLiveCatalog(resolveApiKey(), controller.signal);
-      if (fresh && fresh.length > 0 && !controller.signal.aborted) {
-        registerProvider(pi, mergeCatalogs(fresh, fallback));
+      const fresh = await revalidate(controller.signal, loadCache());
+      if (fresh && !controller.signal.aborted) {
+        registerCatalog(pi, fresh.base, fresh.tombstones);
       }
     } catch {
-      // non-fatal
+      // non-fatal: a failing refresh never blocks a session
     }
   });
 }

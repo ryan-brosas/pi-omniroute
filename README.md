@@ -43,13 +43,10 @@ Open the model picker (`/model`) and choose an OmniRoute model:
 | Model | Notes |
 |-------|-------|
 | `auto` | Smart router — auto-picks provider/fallback across tiers (keyless-ready) |
-| `claude/claude-sonnet-4-6`, `cc/claude-sonnet-4-6` | Claude Sonnet 4.6 via gateway |
-| `cc/claude-opus-4-6` | Claude Opus 4.6 via the gateway |
-| `glm/glm-5.2` | GLM 5.2 |
-| `cheaperinference/claude-sonnet-4-6` | Cheaper Inference budget route |
-| *(hundreds more)* | Added automatically from the gateway’s `/v1/models` when it is reachable |
+| *(live catalog, e.g. `auto/best-coding`, `google/gemini-3-pro`)* | With the gateway running, `/model` lists the ids it reports on `/v1/models`; whether a given upstream actually serves depends on the credentials configured on your OmniRoute instance |
+| *(offline fallback: `claude/claude-sonnet-4-6`, `cc/claude-opus-4-6`, `glm/glm-5.2`, …)* | Registered only when the gateway is unreachable, so the `omniroute` provider still exists in `/model` |
 
-> Model ids use the OmniRoute canonical **`<provider>/<model>`** form (e.g. `google/gemini-3-pro`). The full catalog comes from the live gateway; the entries above are only the curated fallback for when the gateway is unreachable.
+> Model ids use the OmniRoute canonical **`<provider>/<model>`** form (e.g. `google/gemini-3-pro`). The live catalog replaces the curated fallback whenever the gateway answers; a paid id also needs that upstream's credentials on the gateway side. Non-chat image and video entries in the catalog are filtered out — pi only drives chat completions.
 
 ## Configuration
 
@@ -57,17 +54,25 @@ Open the model picker (`/model`) and choose an OmniRoute model:
 | --- | --- | --- |
 | `OMNIROUTE_BASE_URL` | `http://localhost:20128/v1` | Gateway origin (remote host, custom port, https) |
 | `OMNIROUTE_API_KEY` | *(none — keyless)* | Dashboard → Endpoints → API key |
+| `OMNIROUTE_CACHE_DIR` | `<agent dir>/cache` | Where the merged catalog cache is written (useful for tests / sandboxed homes) |
 
 Keyless mode: pick `auto` — OmniRoute answers from the pre-wired free tiers; no token needed. For paid tiers, either export `OMNIROUTE_API_KEY` or run pi’s `/login` and enter the key for the `omniroute` provider (stored in `~/.pi/agent/auth.json`).
 
 ## How it works
 
-1. On startup the extension fetches `{OMNIROUTE_BASE_URL}/models`.
-2. Each live entry gets metadata (reasoning / vision / context limits) via id heuristics, then curated `models.json` fields win per id.
-3. `auto` is always listed first; the gateway’s (trimmed) catalog is registered with pi.
-4. If the gateway is down, the curated fallback keeps the provider registered; `session_start` re-fetches so new models appear on later sessions without a pi restart.
+1. **Zero-latency startup** — the provider registers immediately from the disk cache ∪ the curated `models.json`; registration never awaits the network.
+2. **Background revalidation** — on `session_start` the extension re-fetches `{OMNIROUTE_BASE_URL}/models`, layers the result (live entries → curated fields → `patch.json` overrides → `custom-models.json` additions → tombstoned ids on a 14-day grace), writes the merged catalog to the disk cache, and hot-swaps the registration — new models appear on later sessions without a pi restart.
+3. **Fallback** — with no cache and an unreachable gateway, the curated fallback keeps the provider registered.
 
-Catalog errors are non-fatal — a failing fetch never blocks pi startup.
+Each live entry gets metadata (reasoning / vision / context limits) via id heuristics; curated `models.json` fields win per id, and `auto` is always listed first. Catalog errors are non-fatal — a failing fetch never blocks pi startup.
+
+### Model metadata overrides
+
+| File | Role |
+| --- | --- |
+| `models.json` | Curated offline fallback (hand-maintained) |
+| `patch.json` | Per-model corrections applied on top of the live catalog — never creates ids |
+| `custom-models.json` | Complete model records for ids the gateway does not advertise; replaces same-id entries wholesale |
 
 ## Development
 
