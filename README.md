@@ -70,6 +70,11 @@ Release automation lives in the [`release` workflow](.github/workflows/release.y
   secret (Settings → Secrets and variables → Actions) to enable it; without the secret the
   npm publish is skipped with a warning. Manual `npm publish` still runs the full gate via
   `prepublishOnly`.
+- **Publish to npm on demand** — Actions → **npm publish** → Run workflow: runs the full gate,
+  optionally takes a `version` input (empty = `package.json` version), fails fast when
+  `NPM_TOKEN` is missing or the version already exists on npm, and publishes with provenance.
+  Requires `NPM_TOKEN` once; until the first publish, the npm install commands below do not
+  resolve.
 
 ## Configuration
 

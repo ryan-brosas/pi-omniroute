@@ -13,6 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `v*` tag produces a stable release with label-driven release notes and publishes the
   verified tarball to npm with provenance when the `NPM_TOKEN` secret is configured
   (skipped with a warning when it is not) — an installable artifact always exists after a push.
+- `npm-publish.yml` workflow — an on-demand **Run workflow** button that verifies, packs, and
+  publishes the package straight to npm (optional `version` input, provenance-attested, fails
+  fast on a missing `NPM_TOKEN` secret or an already-published version).
 
 ### Fixed
 
