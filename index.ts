@@ -1,42 +1,33 @@
 /**
- * OmniRoute provider extension for pi
+ * OmniRoute provider extension for pi.
  *
  * Registers the self-hosted OmniRoute AI gateway (github.com/diegosouzapw/OmniRoute)
- * as a pi provider over its OpenAI-compatible API ( /v1/chat/completions ).
+ * as a pi provider over its OpenAI-compatible API (/v1/chat/completions).
  *
- * The gateway exposes one endpoint that routes to 350+ upstream providers
- * (Claude, GPT, Gemini, Kimi, GLM, DeepSeek, MiniMax, …) with quota-aware
- * auto-fallback across subscription / API-key / cheap / free tiers, plus
- * optional RTK + Caveman token compression. It works keyless out of the box
- * through the pre-wired free tiers when you call the "auto" model.
+ * The gateway routes to 350+ upstream providers (Claude, GPT, Gemini, Kimi, GLM,
+ * DeepSeek, MiniMax, ...) with quota-aware auto-fallback across subscription /
+ * API-key / cheap / free tiers, plus optional RTK + Caveman token compression.
+ * It works keyless out of the box via the pre-wired free tiers on the "auto" model.
  *
- *   Base URL    http://localhost:20128/v1   (override with OMNIROUTE_BASE_URL)
- *   Auth        Authorization: Bearer <dashboard key>   (optional, keyless "auto")
- *   Models      stale-while-revalidate catalog (see below)
+ *   Base URL   http://localhost:20128/v1   (override with OMNIROUTE_BASE_URL)
+ *   Auth       Authorization: Bearer <dashboard key>   (optional; keyless "auto")
+ *   Models     pi-owned catalog (ProviderConfig.refreshModels)
  *
- * Model discovery (stale-while-revalidate, best-effort, never fatal):
- *   1. Startup  – register immediately from the disk cache ∪ curated
- *                 models.json. Zero latency: registration never awaits the
- *                 network, so the model picker is ready instantly.
- *   2. Refresh  – session_start re-fetches {base}/models in the background
- *                 and hot-swaps the registration. The merged catalog is
- *                 layered live → curated fields → patch.json →
- *                 custom-models.json → tombstoned ids (14-day grace), then
- *                 written to the disk cache for the next session.
- *   3. Fallback – with no cache and an unreachable gateway, the curated
- *                 fallback list keeps the provider registered.
- *
- * Usage:
- *   npm i -g omniroute && omniroute        # run the gateway (port 20128)
- *   export OMNIROUTE_API_KEY=…             # optional; or store via /login
- *   pi -e /path/to/pi-omniroute
- *   /model → "auto" or e.g. "claude/claude-sonnet-4-6"
+ * Model lifecycle (pi-native, best-effort, never fatal):
+   1. Startup -- register immediately with the curated seed + tombstone grace.
+   2. Refresh -- refreshModels() hook; pi owns cadence and persisted catalog
+      (context.stored / publish({persist})). Offline (allowNetwork false) serves
+      the stored catalog without fetching; otherwise /v1/models is merged
+      live -> curated fields -> patch.json -> custom-models.json -> tombstones
+      (14-day grace), then published and hot-swapped.
+   3. Fallback -- no stored catalog + unreachable gateway = curated fallback.
  */
 import {
   getAgentDir,
   type ExtensionAPI,
-  type ProviderConfig,
+  type ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
+import type { ModelsStoreEntry, RefreshModelsContext } from "@earendil-works/pi-ai";
 import fs from "node:fs";
 import path from "node:path";
 import fallbackModelsData from "./models.json" with { type: "json" };
@@ -61,8 +52,8 @@ const PROVIDER_NAME = "OmniRoute";
 const DEFAULT_BASE_URL = "http://localhost:20128/v1";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_LIVE_CATALOG_ENTRIES = 1000;
-// pi hides models without configured auth. OmniRoute accepts this placeholder
-// for keyless routes; a stored /login credential still takes precedence.
+// pi hides models without a configured apiKey; the gateway accepts this
+// placeholder for keyless routes. A stored /login credential still wins.
 const KEYLESS_API_KEY = "keyless";
 
 function envValue(name: string): string {
@@ -72,38 +63,32 @@ function envValue(name: string): string {
 /** Gateway origin, normalized without a trailing slash. */
 const baseUrl = (envValue("OMNIROUTE_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
 
-// ─── Hand-edit layers ─────────────────────────────────────────────────────────
+// ---- Hand-edit layers -------------------------------------------------------
 
 const curated = fallbackModelsData as ModelRecord[];
 const custom = (customModelsData as ModelRecord[]).filter((m) => !!m?.id);
 const patch = patchData as PatchData;
 
-// ─── Disk cache (stale-while-revalidate) ──────────────────────────────────────
+// ---- Tombstone store (the only thing kept on disk) ------------------------
+// The catalog itself is owned by pi (publish({ persist })); this dir holds
+// only the gateway-keyed tombstone grace for recently-delisted models.
 
-interface CacheFile {
-  /** Last successfully merged live catalog (without customs/tombstoned extras). */
-  models: ModelRecord[];
-  /** Ids the gateway dropped, kept for a grace window with their last record. */
-  tombstones: Tombstones;
-}
-
-const CACHE_DIR =
-  envValue("OMNIROUTE_CACHE_DIR").trim() || path.join(getAgentDir(), "cache");
+const CACHE_DIR = envValue("OMNIROUTE_CACHE_DIR").trim() || path.join(getAgentDir(), "cache");
 
 /**
- * Cache file keyed to the configured gateway: switching OMNIROUTE_BASE_URL
- * can never serve the previous gateway's catalog or tombstones. The legacy
- * unscoped omniroute-models.json is ignored; the next revalidation repopulates.
+ * Tombstone file keyed to the configured gateway: switching OMNIROUTE_BASE_URL
+ * never imports another gateway delist history. Legacy unscoped
+ * omniroute-models.json files (pre-refreshModels versions) are ignored.
  */
-export function cacheFilePathFor(baseUrl: string): string {
+export function tombstonesFilePathFor(origin: string): string {
   let hash = 5381;
-  for (let i = 0; i < baseUrl.length; i++) {
-    hash = ((hash << 5) + hash + baseUrl.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < origin.length; i++) {
+    hash = ((hash << 5) + hash + origin.charCodeAt(i)) >>> 0;
   }
-  return path.join(CACHE_DIR, `omniroute-models-${hash.toString(16)}.json`);
+  return path.join(CACHE_DIR, `omniroute-tombstones-${hash.toString(16)}.json`);
 }
 
-const CACHE_PATH = cacheFilePathFor(baseUrl);
+const TOMBSTONES_PATH = tombstonesFilePathFor(baseUrl);
 
 function sanitizeTombstones(value: unknown): Tombstones {
   const out: Tombstones = {};
@@ -118,50 +103,38 @@ function sanitizeTombstones(value: unknown): Tombstones {
   return out;
 }
 
-function loadCache(): CacheFile | null {
+function loadTombstones(): Tombstones {
   try {
-    const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, "utf8")) as unknown;
-    if (!parsed || typeof parsed !== "object") return null;
-    const raw = parsed as { models?: unknown; tombstones?: unknown };
-    const models = Array.isArray(raw.models)
-      ? raw.models.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
-      : [];
-    const tombstones = sanitizeTombstones(raw.tombstones);
-    if (models.length === 0 && Object.keys(tombstones).length === 0) return null;
-    return { models, tombstones };
+    const parsed = JSON.parse(fs.readFileSync(TOMBSTONES_PATH, "utf8")) as unknown;
+    return sanitizeTombstones(parsed);
   } catch {
-    return null; // missing/corrupt cache — degrade to the curated fallback
+    return {}; // missing/corrupt store removes grace, never fatal
   }
 }
 
-function saveCache(models: ModelRecord[], tombstones: Tombstones): void {
+function saveTombstones(tombstones: Tombstones): void {
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(CACHE_PATH, JSON.stringify({ models, tombstones }, null, 2) + "\n");
+    fs.writeFileSync(TOMBSTONES_PATH, JSON.stringify(tombstones, null, 2) + "\n");
   } catch {
-    /* non-fatal: an unwritable cache only costs next-session freshness */
+    /* non-fatal: an unwritable store only costs the grace window */
   }
 }
 
-/** Cache ∪ curated — a stale cache must not hide newly curated models. */
-function loadStaleModels(cache: CacheFile | null): ModelRecord[] {
-  if (!cache) return [...curated];
-  const merged = new Map(cache.models.map((m) => [m.id, m]));
-  for (const model of curated) {
-    if (!merged.has(model.id)) merged.set(model.id, model);
-  }
-  return [...merged.values()];
+/** Models persisted by a previous pi session, read back from the store. */
+function readStoredModels(stored: unknown): ModelRecord[] {
+  if (!stored || typeof stored !== "object") return [];
+  const raw = (stored as { models?: unknown }).models;
+  return Array.isArray(raw)
+    ? raw.map(asModelRecord).filter((m): m is ModelRecord => m !== null)
+    : [];
 }
 
-// ─── Model metadata heuristics ────────────────────────────────────────────────
-// (moved to models.ts; inferMetadata/transformCatalogModel/mergeCatalogs are
-// re-exported above for scripts/check.ts and tests/probe.ts)
-
-// ── Fetching the live catalog ─────────────────────────────────────────────────
+// ---- Fetching the live catalog -------------------------------------------
 
 async function fetchLiveCatalog(
   apiKey: string | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<ModelRecord[] | null> {
   try {
     const controller = new AbortController();
@@ -197,82 +170,103 @@ async function fetchLiveCatalog(
       clearTimeout(timer);
     }
   } catch {
-    return null; // unreachable gateway, 401 keyless, or timeout — all non-fatal
+    return null; // unreachable gateway, auth failure, timeout -- non-fatal
   }
 }
 
-// ─── Tombstone reconciliation ─────────────────────────────────────────────────
+// ---- Tombstone reconciliation --------------------------------------------
 
 /**
  * Tombstone ids the live catalog dropped; resurrect ids it brought back.
  * The deprecatedAt clock never resets while a model stays delisted.
  */
-function reconcileTombstones(prev: CacheFile | null, merged: ModelRecord[], now: number): Tombstones {
-  const live = new Set(merged.map((m) => m.id));
+function reconcileTombstones(
+  prevModels: ModelRecord[],
+  prevTombstones: Tombstones,
+  live: ModelRecord[],
+  now: number,
+): Tombstones {
+  const liveIds = new Set(live.map((m) => m.id));
   const next: Tombstones = {};
-  for (const [id, tombstone] of Object.entries(prev?.tombstones ?? {})) {
-    if (!live.has(id)) next[id] = tombstone;
+  for (const [id, tombstone] of Object.entries(prevTombstones)) {
+    if (!liveIds.has(id)) next[id] = tombstone;
   }
-  for (const model of prev?.models ?? []) {
-    if (!live.has(model.id) && !next[model.id]) {
+  for (const model of prevModels) {
+    if (!liveIds.has(model.id) && !next[model.id]) {
       next[model.id] = { deprecatedAt: new Date(now).toISOString(), model };
     }
   }
   return next;
 }
 
-// ─── Registration ─────────────────────────────────────────────────────────────
+// ---- Registration ---------------------------------------------------------
 
 function resolveApiKey(): string | undefined {
   const key = envValue("OMNIROUTE_API_KEY").trim();
   return key || undefined;
 }
 
-// One config factory so the streaming config and the model list never desync.
-function makeProviderConfig(models: ModelRecord[]): ProviderConfig {
-  return {
+/** Register base + custom + patch, with tombstoned grace models appended. */
+function registerModels(pi: ExtensionAPI, models: ModelRecord[]): void {
+  pi.registerProvider(PROVIDER_ID, {
     name: PROVIDER_NAME,
     baseUrl,
     apiKey: resolveApiKey() ? "$OMNIROUTE_API_KEY" : KEYLESS_API_KEY,
     api: "openai-completions",
     models,
-  };
+    refreshModels: (context) => refreshFor(pi, context),
+  });
 }
 
-/** Register base ∪ custom ∪ patch ∪ tombstones. */
-function registerCatalog(pi: ExtensionAPI, base: ModelRecord[], tombstones: Tombstones): void {
-  pi.registerProvider(PROVIDER_ID, makeProviderConfig(buildModels(base, custom, patch, tombstones)));
+/** Startup seed: curated core, no network. Tombstones keep grace from disk. */
+function seedModels(now = Date.now()): ModelRecord[] {
+  return buildModels(curated, custom, patch, loadTombstones(), now);
 }
 
-interface Revalidated {
-  base: ModelRecord[];
-  tombstones: Tombstones;
-}
-
-async function revalidate(
-  signal: AbortSignal,
-  prev: CacheFile | null,
-  now = Date.now(),
-): Promise<Revalidated | null> {
-  const live = await fetchLiveCatalog(resolveApiKey(), signal);
-  if (!live || live.length === 0) return null;
-  const base = mergeCatalogs(live, curated);
-  const tombstones = reconcileTombstones(prev, base, now);
-  saveCache(base, tombstones);
-  return { base, tombstones };
+/**
+ * pi-owned refresh: fetch -> merge -> tombstone reconcile -> publish -> swap.
+ * Never throws: every failure degrades to stored or curated models.
+ */
+async function refreshFor(
+  pi: ExtensionAPI,
+  context: RefreshModelsContext,
+): Promise<ProviderModelConfig[]> {
+  const apiKey = resolveApiKey();
+  const stored = readStoredModels(context.stored);
+  if (!context.allowNetwork) {
+    // Cache-only phase: serve the persisted catalog without any fetch.
+    return buildModels(stored.length > 0 ? stored : curated, custom, patch, loadTombstones());
+  }
+  const now = Date.now();
+  const live = await fetchLiveCatalog(apiKey, context.signal);
+  if (live && live.length > 0) {
+    const base = mergeCatalogs(live, curated);
+    const tombstones = reconcileTombstones(stored, loadTombstones(), base, now);
+    saveTombstones(tombstones);
+    const models = buildModels(base, custom, patch, tombstones, now);
+    const entry = { models: base, checkedAt: now } as unknown as ModelsStoreEntry;
+    await context.publish({
+      persist: entry,
+      update: () => registerModels(pi, models),
+    });
+    return models;
+  }
+  // Gateway unreachable / empty: keep the current catalog, no store mutation.
+  const fallback = stored.length > 0 ? stored : curated;
+  const models = buildModels(fallback, custom, patch, loadTombstones(), now);
+  registerModels(pi, models);
+  return models;
 }
 
 export default function (pi: ExtensionAPI): void {
-  const cache = loadCache();
-
-  // 1. Zero-latency startup — serve stale (cache ∪ curated) immediately;
-  //    registration never awaits the network.
-  registerCatalog(pi, loadStaleModels(cache), cache?.tombstones ?? {});
+  // 1. Zero-latency startup: register the curated seed immediately;
+  //    registration never awaits the network. pi re-resolves the catalog
+  //    through refreshModels on its own cadence.
+  registerModels(pi, seedModels());
 
   // Keyless requests carry no credentials. pi requires a configured apiKey to
-  // keep models visible in the picker, so the placeholder exists only locally:
-  // strip it from outgoing requests. Real credentials (OMNIROUTE_API_KEY or a
-  // stored /login key) pass through untouched.
+  // keep models visible in the picker, so the placeholder is local only: strip
+  // it from outgoing requests; real credentials pass through untouched.
   const placeholderAuth = `bearer ${KEYLESS_API_KEY}`;
   pi.on("before_provider_headers", (event, ctx) => {
     if (ctx.model?.provider !== PROVIDER_ID) return;
@@ -280,25 +274,5 @@ export default function (pi: ExtensionAPI): void {
     if (auth && auth.toLowerCase() === placeholderAuth) {
       event.headers["authorization"] = null;
     }
-  });
-
-  // 2. Refresh on session start (gateway may have come online, added models,
-  //    or had its catalog regenerated between sessions). Fire-and-forget:
-  //    pi awaits session_start handlers, so the revalidation promise must
-  //    never join the awaited chain — a slow gateway cannot delay sessions.
-  let refreshAbort: AbortController | null = null;
-  pi.on("session_start", () => {
-    refreshAbort?.abort();
-    const controller = new AbortController();
-    refreshAbort = controller;
-    void revalidate(controller.signal, loadCache())
-      .then((fresh) => {
-        if (fresh && !controller.signal.aborted) {
-          registerCatalog(pi, fresh.base, fresh.tombstones);
-        }
-      })
-      .catch(() => {
-        // non-fatal: a failing refresh never blocks a session
-      });
   });
 }
