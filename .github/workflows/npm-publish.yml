@@ -61,6 +61,6 @@ jobs:
             echo "release v$VERSION already exists - skipping"
             exit 0
           fi
-          ARGS=(--title "pi-omniroute v$VERSION" --generate-release-notes --latest)
-          case "$VERSION" in *-*) ARGS=(--title "pi-omniroute v$VERSION" --generate-release-notes --prerelease);; esac
+          ARGS=(--title "pi-omniroute v$VERSION" --generate-notes --latest)
+          case "$VERSION" in *-*) ARGS=(--title "pi-omniroute v$VERSION" --generate-notes --prerelease);; esac
           gh release create "v$VERSION" ./dist/*.tgz "${ARGS[@]}"
