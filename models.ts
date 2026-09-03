@@ -32,7 +32,7 @@ export interface CatalogEntry {
 // pi only drives chat completions: any entry typed as one of these is dropped,
 // not just image generators (embedding/audio/video models would register and
 // then fail at request time).
-const NON_CHAT_TYPES = new Set(["image", "embedding", "audio", "video", "rerank", "moderation"]);
+const NON_CHAT_TYPES = new Set(["image", "embedding", "audio", "video", "music", "rerank", "moderation"]);
 
 // ─── Model metadata heuristics ────────────────────────────────────────────────
 // The gateway's /v1/models does not reliably report reasoning or vision for

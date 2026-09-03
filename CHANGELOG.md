@@ -13,10 +13,11 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 ### Fixed
 
 - The live-catalog filter drops every non-chat entry type (image, embedding, audio,
-  video, rerank, moderation) — not just `type: "image"` — so embedding-style ids the
-  gateway advertises can no longer register as unusable chat models.
-- Tombstone store writes are atomic (tmp file + rename): a crash mid-write no longer
-  truncates the tombstone store, which would silently cost the whole 14-day grace window.
+  video, music, rerank, moderation) — not just `type: "image"` — so embedding-style ids
+  the gateway advertises can no longer register as unusable chat models.
+- Tombstone store writes are atomic (unique tmp file + rename): a crash mid-write no
+  longer truncates the tombstone store, and concurrent sessions cannot rename each
+  other's unfinished write, which would silently cost the whole 14-day grace window.
 - `bun run verify` is green again: the behavioral probe suite now type-checks clean
   (24 pre-existing `tsc` errors in `tests/probe.ts` — widened `input` literals, an
   incomplete `ExtensionAPI` fake, and TS literal-narrowing false positives are fixed).

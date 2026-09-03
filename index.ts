@@ -116,8 +116,10 @@ function saveTombstones(tombstones: Tombstones): void {
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     // Atomic write: a crash mid-write must not truncate the store (a corrupt
-    // store silently costs the whole grace window on next load).
-    const tmp = `${TOMBSTONES_PATH}.tmp`;
+    // store silently costs the whole grace window on next load). The tmp file
+    // is unique per write so concurrent sessions (each with their own pid)
+    // cannot rename each other's unfinished write.
+    const tmp = `${TOMBSTONES_PATH}.${process.pid}.${Date.now().toString(36)}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(tombstones, null, 2) + "\n");
     fs.renameSync(tmp, TOMBSTONES_PATH);
   } catch {
