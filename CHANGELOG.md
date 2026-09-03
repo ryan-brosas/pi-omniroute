@@ -42,11 +42,14 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 ### Added
 
-- `OMNIROUTE_MODEL_SCOPE` (default `curated`) — what the provider registers: `curated`
-  (the verified floor: `models.json` + `custom-models.json` + patches, fully offline),
-  `routes` (the auto router + `auto/*` only), or `all` (the full live `/v1/models`
-  catalog with tombstones and the persisted store). The 356-entry live catalog swamped
-  the `/model` picker; the curated floor keeps it to the ids this package verified.
+- `OMNIROUTE_MODEL_SCOPE` (default `active`) — what the provider registers: `active`
+  (live ids backed by an active gateway connection via the dashboard's
+  `/api/providers`, unioned with the curated floor — degrades to the floor when the
+  dashboard API is unavailable), `curated` (the verified floor:
+  `models.json` + `custom-models.json` + patches, fully offline), `routes` (the auto
+  router + `auto/*` only), or `all` (the full live `/v1/models` catalog with
+  tombstones and the persisted store). The 500+-entry live catalog swamped the
+  `/model` picker; `active` keeps it to the ids your gateway actually backs.
 - `release.yml` release CI — every push to `main` packs the npm tarball after a full
   `bun run verify` and publishes a `continuous-*` pre-release to GitHub Releases; every
   `v*` tag produces a stable release with label-driven release notes and publishes the
@@ -58,9 +61,10 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 ### Changed
 
-- **Behavior change:** the provider registers the curated floor by default instead of
+- **Behavior change:** the provider registers only the ids your active gateway
+  connections back (plus the auto routes and the curated floor) by default, instead of
   every id the gateway advertises. Set `OMNIROUTE_MODEL_SCOPE=all` for the previous
-  discover-everything behavior; scoped modes never touch the network.
+  discover-everything behavior; `curated`/`routes` scopes never touch the network.
 - `npm-publish.yml` now cuts the GitHub Release itself (tag `v<version>`, tarball attached,
   prerelease for hyphenated versions) — every npm publish ships both artifacts in one run.
 - `typecheck` runs `tsc` from `node_modules/.bin` instead of `bunx tsc`: no network

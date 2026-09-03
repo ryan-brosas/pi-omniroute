@@ -89,6 +89,8 @@ function defaultCatalog(): CatalogEntry[] {
 }
 let catalog = defaultCatalog();
 let receivedAuth: string | undefined;
+// Dashboard /api/providers body (JSON string); null = endpoint absent (404).
+let fakeConnections: string | null = null;
 
 async function withGateway(
   fn: (port: number) => Promise<void>,
@@ -103,6 +105,15 @@ async function withGateway(
       };
       if (opts.delayMs) setTimeout(respond, opts.delayMs);
       else respond();
+    } else if (req.url === "/api/providers") {
+      // Dashboard connections API. null = gateway without the endpoint (404).
+      if (fakeConnections === null) {
+        res.statusCode = 404;
+        res.end("not found");
+      } else {
+        res.setHeader("content-type", "application/json");
+        res.end(fakeConnections);
+      }
     } else {
       res.statusCode = 404;
       res.end("not found");
@@ -114,6 +125,7 @@ async function withGateway(
   try {
     await fn(port);
   } finally {
+    fakeConnections = null;
     server.close();
   }
 }
@@ -551,7 +563,8 @@ async function probeCap(): Promise<void> {
 }
 
 async function probeScope(): Promise<void> {
-  // Default (no env): curated floor — static, no network, no store.
+  // Default (no env): active scope. Without a dashboard API the picker
+  // degrades to the curated floor (auto routes + verified ids), still persisted.
   await withGateway(async (port) => {
     process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
     process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
@@ -562,14 +575,62 @@ async function probeScope(): Promise<void> {
     const mod = await importIndex("../index.ts?probe=scope-default");
     await mod.default(fakePi);
     const models = modelsOf(registrations[0]);
-    assert(models.length === CURATED_COUNT, `default scope registers exactly the curated floor, got ${models.length}`);
+    assert(models.length === CURATED_COUNT, `seed is the curated floor, got ${models.length}`);
     assert(models[0].id === "auto", "auto first in scoped build");
+    const refreshed = await invokeRefresh();
+    assert(receivedAuth === undefined, "keyless discovery sends no credentials");
+    assert(refreshed.length === CURATED_COUNT, `no dashboard API: curated floor + live auto routes, got ${refreshed.length}`);
+    assert((stored as Stored | undefined)?.url === baseUrlFor(port), "active scope persists its catalog");
+    void mod;
+    console.log(`probe 13 OK — active scope, no dashboard API: curated floor (${CURATED_COUNT})`);
+  });
+
+  // Active scope with connections: auto routes + ids whose prefix is backed
+  // by an active connection, unioned with the curated floor. Disabled
+  // connections drop their prefixes even when the catalog advertises them.
+  await withGateway(async (port) => {
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    process.env.OMNIROUTE_MODEL_SCOPE = "active";
+    fakeConnections = JSON.stringify({
+      connections: [
+        { isActive: true, providerSpecificData: { prefix: "google" } },
+        { isActive: false, providerSpecificData: { prefix: "a-random" } },
+      ],
+    });
+    registrations.length = 0;
+    stored = undefined;
+    const mod = await importIndex("../index.ts?probe=scope-active");
+    await mod.default(fakePi);
+    const refreshed = await invokeRefresh();
+    const ids = refreshed.map((m) => String(m.id));
+    assert(ids.includes("google/gemini-3-pro") && ids.includes("google/gemini-2.5-pro"), "active-connection prefixes registered");
+    assert(!ids.includes("a-random/unknown-model-1b"), "disabled-connection prefixes dropped");
+    assert(ids.includes("cc/claude-sonnet-4-6"), "curated floor unioned in");
+    assert(refreshed.length === CURATED_COUNT + 2, `curated floor + active-connection ids, got ${refreshed.length}`);
+    delete process.env.OMNIROUTE_MODEL_SCOPE;
+    void mod;
+    console.log(`probe 14 OK — active scope: ${refreshed.length} ids (curated floor + active connections)`);
+  });
+
+  // curated: static floor — no network, no store.
+  await withGateway(async (port) => {
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    process.env.OMNIROUTE_MODEL_SCOPE = "curated";
+    registrations.length = 0;
+    stored = undefined;
+    const mod = await importIndex("../index.ts?probe=scope-curated");
+    await mod.default(fakePi);
+    const models = modelsOf(registrations[0]);
+    assert(models.length === CURATED_COUNT, `curated scope registers exactly the curated floor, got ${models.length}`);
     const refreshed = await invokeRefresh();
     assert(receivedAuth === undefined, "curated scope never fetches the live catalog");
     assert(refreshed.length === CURATED_COUNT, "refresh serves the curated floor");
-    assert(stored === undefined, "scoped mode persists no store snapshot");
+    assert(stored === undefined, "curated scope persists no store snapshot");
+    delete process.env.OMNIROUTE_MODEL_SCOPE;
     void mod;
-    console.log(`probe 13 OK — curated scope: ${CURATED_COUNT} models, zero network`);
+    console.log(`probe 15 OK — curated scope: ${CURATED_COUNT} models, zero network`);
   });
 
   // routes: only the auto router + auto/* ids.
@@ -585,7 +646,7 @@ async function probeScope(): Promise<void> {
     assert(models.length < CURATED_COUNT, "routes scope is a subset of curated");
     delete process.env.OMNIROUTE_MODEL_SCOPE;
     void mod;
-    console.log(`probe 14 OK — routes scope: ${models.length} auto routes only`);
+    console.log(`probe 16 OK — routes scope: ${models.length} auto routes only`);
   });
 
   // all: opt-in restores the live catalog (fetch happens).
@@ -604,7 +665,7 @@ async function probeScope(): Promise<void> {
     delete process.env.OMNIROUTE_MODEL_SCOPE;
     delete process.env.OMNIROUTE_API_KEY;
     void mod;
-    console.log("probe 15 OK — all scope: live catalog opt-in");
+    console.log("probe 17 OK — all scope: live catalog opt-in");
   });
 }
 
