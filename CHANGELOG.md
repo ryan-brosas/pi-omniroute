@@ -4,7 +4,9 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-09-03
+
+Release 0.3.0 ships the first npm package (pi-omniroute) plus the catalog-lifecycle and curation work below.
 
 ### Changed
 
@@ -29,7 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `tests/probe.ts` derives the offline-fallback size from `models.json` instead of a
   hard-coded count, so curated additions no longer break the probe.
-- Package version 0.2.0.
+- Package version 0.3.0 (npm publish: tarball ships index.ts, models.ts, curated data, README, LICENSE, CHANGELOG; `pi-package` keyword; peer deps on pi core packages; `prepublishOnly` runs the full gate).
+
+## [Unreleased]
 
 ## [0.1.0] - 2026-09-02
 

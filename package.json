@@ -1,7 +1,6 @@
 {
   "name": "pi-omniroute",
-  "version": "0.2.0",
-  "private": true,
+  "version": "0.3.0",
   "type": "module",
   "description": "OmniRoute provider extension for pi — one self-hosted gateway endpoint routing 350+ AI providers (Claude, GPT, Gemini, Kimi, GLM, DeepSeek, MiniMax, …) with free tiers, quota-aware auto-fallback, and token compression.",
   "main": "index.ts",
@@ -11,7 +10,8 @@
     "check": "bun scripts/check.ts",
     "test": "bun tests/probe.ts",
     "typecheck": "bunx tsc --noEmit",
-    "verify": "bun run check && bun run test && bun run typecheck"
+    "verify": "bun run check && bun run test && bun run typecheck",
+    "prepublishOnly": "bun run verify"
   },
   "keywords": [
     "pi",
@@ -23,7 +23,8 @@
     "ai",
     "llm",
     "openai-compatible",
-    "router"
+    "router",
+    "pi-package"
   ],
   "license": "MIT",
   "devDependencies": {
@@ -36,5 +37,30 @@
     "extensions": [
       "./index.ts"
     ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "index.ts",
+    "models.ts",
+    "models.json",
+    "custom-models.json",
+    "patch.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryan-brosas/pi-omniroute.git"
+  },
+  "homepage": "https://github.com/ryan-brosas/pi-omniroute",
+  "bugs": {
+    "url": "https://github.com/ryan-brosas/pi-omniroute/issues"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
   }
 }
