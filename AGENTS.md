@@ -19,11 +19,11 @@ gateway as an OpenAI-compatible provider via `pi.registerProvider("omniroute", �
 
 ## Ground rules
 
-- **Never break keyless mode.** `auto` must resolve without `OMNIROUTE_API_KEY`; the auth header is only added when a key exists.
+- **Never break keyless mode.** `auto` must resolve without `OMNIROUTE_API_KEY`. pi requires a configured `apiKey` to keep models visible, so a local placeholder is used — but `before_provider_headers` strips it from outgoing requests: real keys (`OMNIROUTE_API_KEY` or `/login`) pass through, keyless sends no credentials at all.
 - **Discovery is best-effort.** Catalog fetches must never throw out of the factory; always fall back to the curated list.
 - **Metadata stays honest.** Vision/thinking for unknown ids comes only from `VISION_HINTS` / `REASONING_HINTS`. Prefer `supportsReasoningEffort: true` (OpenAI-style) over exotic `thinkingFormat` values — the gateway is an OpenAI-compatible front.
 - **Curated merge is field-level.** Live catalog wins for existence; curated wins per-field for reasoning / vision / names / output limits. Hand edits go to `patch.json` (corrections, wins over everything per-field) and `custom-models.json` (extra ids); `models.json` is the offline floor. Tombstones keep recently-delisted ids alive for 14 days (cache file, runtime-written).
-- **Right-size the catalog.** `MAX_LIVE_CATALOG_ENTRIES` caps registered models at 1000.
+- **Right-size the catalog.** The registered catalog is capped at 1000 (`MAX_REGISTERED_MODELS` in `models.ts`, priority: auto → customs → live → tombstones); the live fetch is additionally trimmed by `MAX_LIVE_CATALOG_ENTRIES`. The disk cache is keyed to the configured base URL — switching `OMNIROUTE_BASE_URL` starts a fresh catalog.
 
 ## Verification
 

@@ -54,9 +54,9 @@ Open the model picker (`/model`) and choose an OmniRoute model:
 | --- | --- | --- |
 | `OMNIROUTE_BASE_URL` | `http://localhost:20128/v1` | Gateway origin (remote host, custom port, https) |
 | `OMNIROUTE_API_KEY` | *(none — keyless)* | Dashboard → Endpoints → API key |
-| `OMNIROUTE_CACHE_DIR` | `<agent dir>/cache` | Where the merged catalog cache is written (useful for tests / sandboxed homes) |
+| `OMNIROUTE_CACHE_DIR` | `<agent dir>/cache` | Where the merged catalog cache is written (useful for tests / sandboxed homes). The cache is keyed to the configured gateway — changing `OMNIROUTE_BASE_URL` starts a fresh catalog |
 
-Keyless mode: pick `auto` — OmniRoute answers from the pre-wired free tiers; no token needed. For paid tiers, either export `OMNIROUTE_API_KEY` or run pi’s `/login` and enter the key for the `omniroute` provider (stored in `~/.pi/agent/auth.json`).
+Keyless mode: pick `auto` — OmniRoute answers from the pre-wired free tiers; no token needed, and requests are sent **without** an `Authorization` header. For paid tiers, either export `OMNIROUTE_API_KEY` or run pi’s `/login` and enter the key for the `omniroute` provider (stored in `~/.pi/agent/auth.json`).
 
 ## How it works
 

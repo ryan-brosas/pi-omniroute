@@ -89,7 +89,21 @@ interface CacheFile {
 
 const CACHE_DIR =
   envValue("OMNIROUTE_CACHE_DIR").trim() || path.join(getAgentDir(), "cache");
-const CACHE_PATH = path.join(CACHE_DIR, "omniroute-models.json");
+
+/**
+ * Cache file keyed to the configured gateway: switching OMNIROUTE_BASE_URL
+ * can never serve the previous gateway's catalog or tombstones. The legacy
+ * unscoped omniroute-models.json is ignored; the next revalidation repopulates.
+ */
+export function cacheFilePathFor(baseUrl: string): string {
+  let hash = 5381;
+  for (let i = 0; i < baseUrl.length; i++) {
+    hash = ((hash << 5) + hash + baseUrl.charCodeAt(i)) >>> 0;
+  }
+  return path.join(CACHE_DIR, `omniroute-models-${hash.toString(16)}.json`);
+}
+
+const CACHE_PATH = cacheFilePathFor(baseUrl);
 
 function sanitizeTombstones(value: unknown): Tombstones {
   const out: Tombstones = {};
@@ -255,20 +269,36 @@ export default function (pi: ExtensionAPI): void {
   //    registration never awaits the network.
   registerCatalog(pi, loadStaleModels(cache), cache?.tombstones ?? {});
 
+  // Keyless requests carry no credentials. pi requires a configured apiKey to
+  // keep models visible in the picker, so the placeholder exists only locally:
+  // strip it from outgoing requests. Real credentials (OMNIROUTE_API_KEY or a
+  // stored /login key) pass through untouched.
+  const placeholderAuth = `bearer ${KEYLESS_API_KEY}`;
+  pi.on("before_provider_headers", (event, ctx) => {
+    if (ctx.model?.provider !== PROVIDER_ID) return;
+    const auth = event.headers["authorization"] ?? event.headers["Authorization"];
+    if (auth && auth.toLowerCase() === placeholderAuth) {
+      event.headers["authorization"] = null;
+    }
+  });
+
   // 2. Refresh on session start (gateway may have come online, added models,
-  //    or had its catalog regenerated between sessions).
+  //    or had its catalog regenerated between sessions). Fire-and-forget:
+  //    pi awaits session_start handlers, so the revalidation promise must
+  //    never join the awaited chain — a slow gateway cannot delay sessions.
   let refreshAbort: AbortController | null = null;
-  pi.on("session_start", async () => {
+  pi.on("session_start", () => {
     refreshAbort?.abort();
     const controller = new AbortController();
     refreshAbort = controller;
-    try {
-      const fresh = await revalidate(controller.signal, loadCache());
-      if (fresh && !controller.signal.aborted) {
-        registerCatalog(pi, fresh.base, fresh.tombstones);
-      }
-    } catch {
-      // non-fatal: a failing refresh never blocks a session
-    }
+    void revalidate(controller.signal, loadCache())
+      .then((fresh) => {
+        if (fresh && !controller.signal.aborted) {
+          registerCatalog(pi, fresh.base, fresh.tombstones);
+        }
+      })
+      .catch(() => {
+        // non-fatal: a failing refresh never blocks a session
+      });
   });
 }

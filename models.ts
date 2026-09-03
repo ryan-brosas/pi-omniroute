@@ -220,9 +220,14 @@ export function withTombstones(
   return extras.length ? [...models, ...extras] : models;
 }
 
+/** Registered-catalog ceiling. Priority under the cap: auto → customs → live → tombstones. */
+export const MAX_REGISTERED_MODELS = 1000;
+
 /**
  * Full merge pipeline: base → custom (replaces same-id wholesale / adds) →
  * patch (per-field, never creates ids). "auto" is always sorted first.
+ * The registered catalog is capped at `max` with deterministic priority —
+ * a full live-catalog turnover cannot double the registration via tombstones.
  */
 export function buildModels(
   base: ModelRecord[],
@@ -230,6 +235,7 @@ export function buildModels(
   patch: PatchData,
   tombstones: Tombstones = {},
   now = Date.now(),
+  max = MAX_REGISTERED_MODELS,
 ): ModelRecord[] {
   const modelMap = new Map<string, ModelRecord>();
   for (const model of withTombstones(base, tombstones, now)) {
@@ -242,7 +248,24 @@ export function buildModels(
     const existing = modelMap.get(id);
     if (existing) modelMap.set(id, applyPatch(existing, entry));
   }
-  return [...modelMap.values()].sort(autoFirstCompare);
+  const all = [...modelMap.values()].sort(autoFirstCompare);
+  if (all.length <= max) return all;
+
+  // Over the cap: auto always survives; customs outrank live entries; live
+  // entries outrank tombstoned grace models.
+  const keep = new Set<string>(["auto"]);
+  for (const model of custom) {
+    if (model?.id && keep.size < max) keep.add(model.id);
+  }
+  for (const model of base) {
+    if (model?.id && keep.size < max) keep.add(model.id);
+  }
+  const baseIds = new Set(base.map((m) => m?.id).filter(Boolean) as string[]);
+  for (const id of Object.keys(tombstones)) {
+    if (keep.size >= max) break;
+    if (!baseIds.has(id)) keep.add(id);
+  }
+  return all.filter((m) => keep.has(m.id));
 }
 
 /** Shape-guard for cache records: one bad entry must not nuke the whole cache. */
