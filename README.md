@@ -1,6 +1,6 @@
 # 🔀 pi-omniroute
 
-[![quality](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/quality.yml/badge.svg)](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/quality.yml)
+[![quality](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/quality.yml/badge.svg)](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/quality.yml)  [![release](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/release.yml/badge.svg)](https://github.com/ryan-brosas/pi-omniroute/actions/workflows/release.yml)
 
 **OmniRoute as an LLM provider for [pi](https://github.com/earendil-works/pi-coding-agent).**
 
@@ -55,6 +55,20 @@ Open the model picker (`/model`) and choose an OmniRoute model:
 | *(offline fallback: 37 curated models — `auto` + all built-in `auto/*` routes (`auto/best-coding`, `auto/reasoning:pro`, `auto/vision`, …) + `claude/claude-sonnet-4-6`, `cc/claude-opus-4-6`, `glm/glm-5.2`, …)* | Registered only when the gateway is unreachable, so the `omniroute` provider still exists in `/model` |
 
 > Model ids use the OmniRoute canonical **`<provider>/<model>`** form (e.g. `google/gemini-3-pro`). `auto/*` are OmniRoute's built-in router routes that resolve on demand; the curated fallback ships the full upstream set (verified against the builtin catalog), so the offline picker still offers them. The live catalog replaces the curated fallback whenever the gateway answers; a paid id also needs that upstream's credentials on the gateway side. Non-chat image and video entries in the catalog are filtered out — pi only drives chat completions.
+
+## Releases
+
+Release automation lives in the [`release` workflow](.github/workflows/release.yml):
+
+- **Every push to `main`** runs the full gate (`bun run verify`), packs the npm tarball, and
+  publishes a `continuous-*` **pre-release** on [GitHub Releases](/releases) — an installable
+  artifact always exists for the latest commit.
+- **Every `v*` tag** (`v0.3.0`, …) produces a **stable release** on the Releases page with
+  label-driven release notes (see [`.github/release.yml`](.github/release.yml)) and the same
+  tarball attached.
+
+npm publishing itself stays a manual maintainer step — `npm publish` runs the full gate via
+`prepublishOnly`.
 
 ## Configuration
 
