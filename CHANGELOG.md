@@ -17,6 +17,8 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 ### Fixed
 
+- `pi-omniroute@0.4.1` (published minutes after 0.4.0 as a publishing-pipeline
+  shakedown) is retracted; **0.4.0 is the current release**.
 - `release.yml` regains the tag-triggered stable-release job (v* tags cut the stable GitHub
   Release with the verified tarball). `npm-publish.yml` publishes to npm and skips its
   GitHub-Release step when the tag release already exists — both paths can run for the same
