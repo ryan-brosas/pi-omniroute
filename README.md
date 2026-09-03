@@ -98,7 +98,7 @@ Each live entry gets metadata (reasoning / vision / context limits) via id heuri
 
 ## Development
 
-Package manager: **Bun** — the repo ships `bun.lock` and CI runs `oven-sh/setup-bun`. The gates are plain scripts, so npm/pnpm can run them too; only the Bun lockfile is committed.
+Package manager: **Bun** — the repo ships `bun.lock` and CI runs `oven-sh/setup-bun`. npm can drive the same gates (`npm run verify`), but the check/test scripts execute on the Bun runtime, so `bun` stays a requirement (`tsc` resolves from `node_modules/.bin`, no `bunx` involved). pnpm is not supported: its auto-install blocks unapproved build scripts and rewrites `node_modules`. Only the Bun lockfile is committed.
 
 ```bash
 bun install --frozen-lockfile   # devDependencies for typechecking
