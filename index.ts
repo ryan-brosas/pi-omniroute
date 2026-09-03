@@ -345,20 +345,18 @@ function registerModels(pi: ExtensionAPI, models: ModelRecord[]): void {
   });
 }
 
-/**
- * Union the curated floor into a live-derived base (active scope): verified
- * ids stay visible even when the live catalog doesn't advertise them. Fields
- * of overlapping ids were already merged by mergeCatalogs.
- */
-function unionCuratedFloor(base: ModelRecord[]): ModelRecord[] {
-  const seen = new Set(base.map((m) => m.id));
-  const extras = curated.filter((m) => !seen.has(m.id));
-  return extras.length > 0 ? [...base, ...extras] : base;
-}
-
-/** Startup seed: curated core, no network. Tombstones keep grace from disk. */
+/** Startup seed: the auto router (active) / curated floor (all), no network. */
 function seedModels(now = Date.now()): ModelRecord[] {
-  return MODEL_SCOPE === "all" ? buildModels(curated, custom, patch, loadTombstones(), now) : scopedBuild(now);
+  if (MODEL_SCOPE === "all") return buildModels(curated, custom, patch, loadTombstones(), now);
+  if (MODEL_SCOPE === "active") {
+    // Keyless workhorse only: the bare auto router seeds the picker until the
+    // first online refresh learns the active connection prefixes. The curated
+    // floor's direct ids (claude/..., glm/...) are NOT registered here — the
+    // active scope mirrors what the gateway connections actually back.
+    const auto = curated.find((m) => m.id === "auto");
+    return auto ? [auto] : [];
+  }
+  return scopedBuild(now);
 }
 
 /**
@@ -390,13 +388,16 @@ async function refreshFor(
     // outside it still work via a custom model id. The curated floor is
     // always unioned in. Without a dashboard API, degrade to the floor.
     const prefixes = MODEL_SCOPE === "active" ? await fetchActivePrefixes(apiKey, context.signal) : null;
+    // Active cut: the bare auto router plus ids whose connection prefix is
+    // active. The auto/* variants and the curated floor's direct ids are not
+    // registered here (they still resolve when typed as custom model ids —
+    // the gateway routes by model name). No curated union: the picker
+    // mirrors what the gateway connections actually back.
     const visible =
       MODEL_SCOPE === "active"
-        ? prefixes
-          ? live.filter((m) => isRouteId(m.id) || prefixes.has(prefixOf(m.id)))
-          : live.filter((m) => isRouteId(m.id))
+        ? live.filter((m) => m.id === "auto" || (prefixes?.has(prefixOf(m.id)) ?? false))
         : live;
-    const base = MODEL_SCOPE === "active" ? unionCuratedFloor(mergeCatalogs(visible, curated)) : mergeCatalogs(visible, curated);
+    const base = mergeCatalogs(visible, curated);
     const tombstones = MODEL_SCOPE === "all" ? reconcileTombstones(stored, loadTombstones(), base, now) : {};
     if (MODEL_SCOPE === "all") saveTombstones(tombstones);
     const models = buildModels(base, custom, patch, tombstones, now);

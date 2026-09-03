@@ -44,12 +44,13 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 - `OMNIROUTE_MODEL_SCOPE` (default `active`) — what the provider registers: `active`
   (live ids backed by an active gateway connection via the dashboard's
-  `/api/providers`, unioned with the curated floor — degrades to the floor when the
-  dashboard API is unavailable), `curated` (the verified floor:
+  `/api/providers`, plus the `auto` router — degrades to the auto router alone when
+  the dashboard API is unavailable), `curated` (the verified floor:
   `models.json` + `custom-models.json` + patches, fully offline), `routes` (the auto
   router + `auto/*` only), or `all` (the full live `/v1/models` catalog with
   tombstones and the persisted store). The 500+-entry live catalog swamped the
-  `/model` picker; `active` keeps it to the ids your gateway actually backs. Both
+  `/model` picker; `active` keeps it to the ids your gateway actually backs — no
+  curated-floor union, no `auto/*` variants unless a connection backs them. Both
   connection shapes are handled (compatible rows via `providerSpecificData.prefix`,
   standard API-key/OAuth rows via the top-level `provider` field, mapped through
   OmniRoute's provider-to-catalog aliases such as claude → cc), and pi-owned catalog
@@ -67,8 +68,8 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 ### Changed
 
 - **Behavior change:** the provider registers only the ids your active gateway
-  connections back (plus the auto routes and the curated floor) by default, instead of
-  every id the gateway advertises. Set `OMNIROUTE_MODEL_SCOPE=all` for the previous
+  connections back (plus the bare `auto` router) by default, instead of every id the
+  gateway advertises. Set `OMNIROUTE_MODEL_SCOPE=all` for the previous
   discover-everything behavior; `curated`/`routes` scopes never touch the network.
 - `npm-publish.yml` now cuts the GitHub Release itself (tag `v<version>`, tarball attached,
   prerelease for hyphenated versions) — every npm publish ships both artifacts in one run.

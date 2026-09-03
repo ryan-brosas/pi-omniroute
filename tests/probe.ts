@@ -577,14 +577,13 @@ async function probeScope(): Promise<void> {
     const mod = await importIndex("../index.ts?probe=scope-default");
     await mod.default(fakePi);
     const models = modelsOf(registrations[0]);
-    assert(models.length === CURATED_COUNT, `seed is the curated floor, got ${models.length}`);
-    assert(models[0].id === "auto", "auto first in scoped build");
+    assert(models.length === 1 && models[0].id === "auto", `active seed is the bare auto router, got ${models.length}`);
     const refreshed = await invokeRefresh();
     assert(receivedAuth === undefined, "keyless discovery sends no credentials");
-    assert(refreshed.length === CURATED_COUNT, `no dashboard API: curated floor + live auto routes, got ${refreshed.length}`);
+    assert(refreshed.length === 1 && refreshed[0].id === "auto", `no dashboard API: auto router only, got ${refreshed.length}`);
     assert((stored as Stored | undefined)?.url === baseUrlFor(port), "active scope persists its catalog");
     void mod;
-    console.log(`probe 13 OK — active scope, no dashboard API: curated floor (${CURATED_COUNT})`);
+    console.log("probe 13 OK — active scope, no dashboard API: auto router only");
   });
 
   // Active scope with connections: auto routes + ids whose prefix is backed
@@ -611,13 +610,14 @@ async function probeScope(): Promise<void> {
     assert(ids.includes("google/gemini-3-pro") && ids.includes("google/gemini-2.5-pro"), "standard rows: top-level provider field used as prefix");
     assert(ids.includes("cc/claude-fake-9"), "canonical alias (claude -> cc) keeps aliased catalog ids");
     assert(!ids.includes("a-random/unknown-model-1b"), "disabled-connection prefixes dropped");
-    assert(ids.includes("cc/claude-sonnet-4-6"), "curated floor unioned in");
-    assert(refreshed.length === CURATED_COUNT + 3, `curated floor + active-connection ids, got ${refreshed.length}`);
+    assert(!ids.includes("glm/glm-5.2"), "no curated union: unbacked floor ids absent from the active cut");
+    assert(!ids.some((id) => String(id).startsWith("auto/")), "auto/* variants dropped from the active cut");
+    assert(refreshed.length === 5, `connection-backed ids + the auto router, got ${refreshed.length}`);
     assert((stored as Stored | undefined)?.scope === "active", "published snapshot records its scope");
     catalog = defaultCatalog();
     delete process.env.OMNIROUTE_MODEL_SCOPE;
     void mod;
-    console.log(`probe 14 OK — active scope: ${refreshed.length} ids (curated floor + active connections)`);
+    console.log(`probe 14 OK — active scope: ${refreshed.length} ids (connections + auto router)`);
   });
 
   // curated: static floor — no network, no store.
