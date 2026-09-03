@@ -46,4 +46,4 @@ jobs:
           mkdir -p dist
           npm pack --pack-destination dist
       - name: Publish to npm
-        run: npm publish dist/*.tgz --provenance --access public
+        run: npm publish ./dist/*.tgz --provenance --access public
