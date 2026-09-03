@@ -43,6 +43,11 @@ const fakePi = {
 // `registrations.length = 0` + one push (flags `=== 2` as impossible).
 const regCount = (): number => registrations.length;
 
+// Live-pipeline probes exercise the full catalog lifecycle (fetch, publish,
+// tombstones, store): opt into the `all` scope globally; probeScope overrides
+// per cache-busted import for the curated/routes static builds.
+process.env.OMNIROUTE_MODEL_SCOPE = "all";
+
 function assert(cond: unknown, message: string): asserts cond {
   if (!cond) throw new Error(`PROBE FAIL: ${message}`);
 }
@@ -545,6 +550,64 @@ async function probeCap(): Promise<void> {
   console.log("probe 10 OK — layered catalog honors the 1000-model cap with deterministic priority");
 }
 
+async function probeScope(): Promise<void> {
+  // Default (no env): curated floor — static, no network, no store.
+  await withGateway(async (port) => {
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    delete process.env.OMNIROUTE_API_KEY;
+    delete process.env.OMNIROUTE_MODEL_SCOPE;
+    registrations.length = 0;
+    stored = undefined;
+    const mod = await importIndex("../index.ts?probe=scope-default");
+    await mod.default(fakePi);
+    const models = modelsOf(registrations[0]);
+    assert(models.length === CURATED_COUNT, `default scope registers exactly the curated floor, got ${models.length}`);
+    assert(models[0].id === "auto", "auto first in scoped build");
+    const refreshed = await invokeRefresh();
+    assert(receivedAuth === undefined, "curated scope never fetches the live catalog");
+    assert(refreshed.length === CURATED_COUNT, "refresh serves the curated floor");
+    assert(stored === undefined, "scoped mode persists no store snapshot");
+    void mod;
+    console.log(`probe 13 OK — curated scope: ${CURATED_COUNT} models, zero network`);
+  });
+
+  // routes: only the auto router + auto/* ids.
+  await withGateway(async (port) => {
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    process.env.OMNIROUTE_MODEL_SCOPE = "routes";
+    registrations.length = 0;
+    const mod = await importIndex("../index.ts?probe=scope-routes");
+    await mod.default(fakePi);
+    const models = modelsOf(registrations[0]);
+    assert(models.every((m) => String(m.id) === "auto" || String(m.id).startsWith("auto/")), "routes scope registers only auto routes");
+    assert(models.length < CURATED_COUNT, "routes scope is a subset of curated");
+    delete process.env.OMNIROUTE_MODEL_SCOPE;
+    void mod;
+    console.log(`probe 14 OK — routes scope: ${models.length} auto routes only`);
+  });
+
+  // all: opt-in restores the live catalog (fetch happens).
+  await withGateway(async (port) => {
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    process.env.OMNIROUTE_API_KEY = "scope-all-key";
+    process.env.OMNIROUTE_MODEL_SCOPE = "all";
+    registrations.length = 0;
+    stored = undefined;
+    const mod = await importIndex("../index.ts?probe=scope-all");
+    await mod.default(fakePi);
+    const refreshed = await invokeRefresh();
+    assert(receivedAuth === "Bearer scope-all-key", "all scope fetches the live catalog");
+    assert(refreshed.length === 5, `all scope serves the live catalog, got ${refreshed.length}`);
+    delete process.env.OMNIROUTE_MODEL_SCOPE;
+    delete process.env.OMNIROUTE_API_KEY;
+    void mod;
+    console.log("probe 15 OK — all scope: live catalog opt-in");
+  });
+}
+
 async function probePublishRejects(): Promise<void> {
   await withGateway(async (port) => {
     process.env.OMNIROUTE_API_KEY = "reject-key";
@@ -580,6 +643,7 @@ try {
   await probeCap();
   await probeGatewayScoping();
   await probePublishRejects();
+  await probeScope();
   console.log("ALL PROBES PASSED");
 } finally {
   for (const dir of cacheDirs) fs.rmSync(dir, { recursive: true, force: true });

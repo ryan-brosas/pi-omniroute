@@ -42,6 +42,11 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 ### Added
 
+- `OMNIROUTE_MODEL_SCOPE` (default `curated`) — what the provider registers: `curated`
+  (the verified floor: `models.json` + `custom-models.json` + patches, fully offline),
+  `routes` (the auto router + `auto/*` only), or `all` (the full live `/v1/models`
+  catalog with tombstones and the persisted store). The 356-entry live catalog swamped
+  the `/model` picker; the curated floor keeps it to the ids this package verified.
 - `release.yml` release CI — every push to `main` packs the npm tarball after a full
   `bun run verify` and publishes a `continuous-*` pre-release to GitHub Releases; every
   `v*` tag produces a stable release with label-driven release notes and publishes the
@@ -53,6 +58,9 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 ### Changed
 
+- **Behavior change:** the provider registers the curated floor by default instead of
+  every id the gateway advertises. Set `OMNIROUTE_MODEL_SCOPE=all` for the previous
+  discover-everything behavior; scoped modes never touch the network.
 - `npm-publish.yml` now cuts the GitHub Release itself (tag `v<version>`, tarball attached,
   prerelease for hyphenated versions) — every npm publish ships both artifacts in one run.
 - `typecheck` runs `tsc` from `node_modules/.bin` instead of `bunx tsc`: no network

@@ -63,6 +63,28 @@ function envValue(name: string): string {
 /** Gateway origin, normalized without a trailing slash. */
 const baseUrl = (envValue("OMNIROUTE_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
 
+// ---- Model scope ------------------------------------------------------------
+// Which catalog the provider registers. The live gateway advertises every
+// routable id (350+); the curated floor is what this package hand-verified.
+//   curated (default) — only models.json + custom-models.json + patches
+//   routes            — only the auto router + auto/* routes
+//   all               — the full live /v1/models catalog (previous behavior)
+type ModelScope = "curated" | "routes" | "all";
+const MODEL_SCOPE: ModelScope = (() => {
+  const raw = envValue("OMNIROUTE_MODEL_SCOPE").trim().toLowerCase();
+  return raw === "routes" || raw === "all" ? raw : "curated";
+})();
+
+const isRouteId = (id: string) => id === "auto" || id.startsWith("auto/");
+
+function scopedBuild(now = Date.now()): ModelRecord[] {
+  // Static build: no live catalog, no store, no tombstones (those only exist
+  // for live-delisted ids). Customs are hand-added, so they follow the scope.
+  const base = MODEL_SCOPE === "routes" ? curated.filter((m) => isRouteId(m.id)) : curated;
+  const customs = MODEL_SCOPE === "routes" ? custom.filter((m) => isRouteId(m.id)) : custom;
+  return buildModels(base, customs, patch, {}, now);
+}
+
 // ---- Hand-edit layers -------------------------------------------------------
 
 const curated = fallbackModelsData as ModelRecord[];
@@ -249,7 +271,7 @@ function registerModels(pi: ExtensionAPI, models: ModelRecord[]): void {
 
 /** Startup seed: curated core, no network. Tombstones keep grace from disk. */
 function seedModels(now = Date.now()): ModelRecord[] {
-  return buildModels(curated, custom, patch, loadTombstones(), now);
+  return MODEL_SCOPE === "all" ? buildModels(curated, custom, patch, loadTombstones(), now) : scopedBuild(now);
 }
 
 /**
@@ -260,6 +282,11 @@ async function refreshFor(
   pi: ExtensionAPI,
   context: RefreshModelsContext,
 ): Promise<ProviderModelConfig[]> {
+  // Scoped modes are static: the curated floor needs no network, no store,
+  // and no re-registration (pi's registration hook fires an offline refresh —
+  // registering again here would loop). The returned list replaces the
+  // extension models via the composed refresh wrapper.
+  if (MODEL_SCOPE !== "all") return scopedBuild();
   const apiKey = effectiveApiKey(context);
   const stored = readStoredModels(context.stored);
   if (!context.allowNetwork) {
