@@ -12,10 +12,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import fallbackModels from "../models.json" with { type: "json" };
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ModelRecord } from "../models.ts";
 
 const CURATED_COUNT = (fallbackModels as unknown[]).length;
 
 // ── Fake pi ExtensionAPI ─────────────────────────────────────────────────────
+// Cache-busted dynamic imports: bun serves the query string as a fresh module
+// instance per probe, but TS cannot resolve the specifier -- type the shapes here.
+const importIndex = (spec: string): Promise<typeof import("../index.ts")> => import(spec);
+const importModels = (spec: string): Promise<typeof import("../models.ts")> => import(spec);
+
 interface Entry {
   name: string;
   config: Record<string, unknown>;
@@ -30,7 +37,11 @@ const fakePi = {
   on: (event: string, handler: Handler) => {
     handlers.set(event, handler);
   },
-};
+} as unknown as ExtensionAPI;
+
+// Escape hatch from TS's literal narrowing of `registrations.length` after
+// `registrations.length = 0` + one push (flags `=== 2` as impossible).
+const regCount = (): number => registrations.length;
 
 function assert(cond: unknown, message: string): asserts cond {
   if (!cond) throw new Error(`PROBE FAIL: ${message}`);
@@ -115,10 +126,10 @@ function freshCacheDir(): string {
 }
 
 // ---- Store + refresh harness: mimics pi's catalog store and refresh hook -----
-interface Stored { models?: unknown[]; checkedAt?: number; }
+interface Stored { models?: unknown[]; checkedAt?: number; url?: string; }
 let stored: Stored | undefined;
 
-async function invokeRefresh(options: { allowNetwork?: boolean } = {}): Promise<Array<Record<string, unknown>>> {
+async function invokeRefresh(options: { allowNetwork?: boolean; publishFails?: boolean } = {}): Promise<Array<Record<string, unknown>>> {
   const entry = registrations[registrations.length - 1];
   const fn = entry.config.refreshModels as
     | ((ctx: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>)
@@ -132,6 +143,7 @@ async function invokeRefresh(options: { allowNetwork?: boolean } = {}): Promise<
       persist?: { models?: unknown[]; checkedAt?: number; url?: string } | null;
       update?: () => void;
     }) => {
+      if (options.publishFails) throw new Error("pi store unavailable");
       if (publication.persist === null) stored = undefined;
       else if (publication.persist) {
         stored = {
@@ -148,11 +160,11 @@ async function invokeRefresh(options: { allowNetwork?: boolean } = {}): Promise<
 }
 
 // ── Shared records for cache seeding / tombstone probes ──────────────────────
-const AUTO_RECORD = {
+const AUTO_RECORD: ModelRecord = {
   id: "auto", name: "Auto", reasoning: false, input: ["text"],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 16384,
 };
-const OLD_RECORD = {
+const OLD_RECORD: ModelRecord = {
   id: "provider/old-model", name: "Old Model", reasoning: false, input: ["text"],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32768,
 };
@@ -169,29 +181,30 @@ async function probeLive(): Promise<void> {
     process.env.OMNIROUTE_CACHE_DIR = cacheDir;
     registrations.length = 0;
 
-    const mod = await import("../index.ts?probe=live");
+    const mod = await importIndex("../index.ts?probe=live");
     await mod.default(fakePi);
 
     // Zero-latency: the factory registered without touching the network.
-    assert(registrations.length === 1, "factory registers immediately");
+    assert(regCount() === 1, "factory registers immediately");
     assert(receivedAuth === undefined, "factory did not fetch (zero-latency registration)");
     const { name, config } = registrations[0];
     assert(name === "omniroute", `provider id, got ${name}`);
     assert(config.baseUrl === baseUrlFor(port), "baseUrl points at gateway");
     assert(config.api === "openai-completions", "api is openai-completions");
     assert(config.apiKey === "$OMNIROUTE_API_KEY", "apiKey env-ref set");
+    assert(config.authHeader === true, "authHeader routes the resolved key through pi's header pipeline — without it the before_provider_headers strip never sees the Authorization header and the keyless placeholder reaches the gateway (SDK adds its own Bearer after the hook)");
     const stale = modelsOf(registrations[0]);
     assert(stale.length === CURATED_COUNT, `seed registration = curated fallback, got ${stale.length}`);
     assert(stale[0].id === "auto", "auto first on seed");
 
     // Drive the pi refresh hook: fetch -> merge -> publish -> hot-swap.
     await invokeRefresh();
-    assert(registrations.length === 2, "refresh re-registers exactly once");
+    assert(regCount() === 2, "refresh re-registers exactly once");
     assert(receivedAuth === "Bearer secret-key-123", "catalog fetch authorized");
     const models = modelsOf(registrations[1]);
     assert(models[0].id === "auto", "auto first");
     assert(models.length === 5, `live catalog size ${models.length}`);
-    assert(!models.some((m) => m.id.startsWith("aihorde/")), "image-only catalog entries dropped");
+    assert(!models.some((m) => String(m.id).startsWith("aihorde/")), "image-only catalog entries dropped");
 
     // Curated extras must NOT be appended while the live catalog is present:
     // only the injected "auto" entry survives an empty live list.
@@ -243,17 +256,17 @@ async function probeNonBlocking(): Promise<void> {
     process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
     registrations.length = 0;
 
-    const mod = await import("../index.ts?probe=zero");
+    const mod = await importIndex("../index.ts?probe=zero");
     // The gateway answers after 400ms; neither the factory nor session_start
     // may wait for it.
     const started = Date.now();
     await mod.default(fakePi);
     assert(Date.now() - started < 200, "factory returns without awaiting the gateway");
-    assert(registrations.length === 1, "registered before the gateway answered");
+    assert(regCount() === 1, "registered before the gateway answered");
 
     const delayed = await invokeRefresh();
     assert(Date.now() - started > 350, "refresh waits out the delayed gateway");
-    assert(registrations.length === 2, "hot-swap after the delayed gateway");
+    assert(regCount() === 2, "hot-swap after the delayed gateway");
     assert(delayed.length === 5, "hot-swap serves the live catalog");
     void mod;
     console.log("probe 2 OK — a delayed gateway delays neither registration nor session start");
@@ -265,7 +278,7 @@ async function probeRefresh(): Promise<void> {
     process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
     process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
     registrations.length = 0;
-    const mod = await import("../index.ts?probe=refresh");
+    const mod = await importIndex("../index.ts?probe=refresh");
     await mod.default(fakePi);
 
     catalog = [...catalog, { id: "provider/fresh-model-2", object: "model" }];
@@ -283,10 +296,10 @@ async function probeOfflineCold(): Promise<void> {
   process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
   registrations.length = 0;
   stored = undefined;
-  const mod = await import("../index.ts?probe=offline");
+  const mod = await importIndex("../index.ts?probe=offline");
   await mod.default(fakePi);
 
-  assert(registrations.length === 1, "still registers provider offline");
+  assert(regCount() === 1, "still registers provider offline");
   const models = modelsOf(registrations[0]);
   assert(models.length === CURATED_COUNT, `offline fallback = curated list, got ${models.length}`);
   assert(models[0].id === "auto", "auto first offline");
@@ -318,10 +331,10 @@ async function probeOfflineWarm(): Promise<void> {
     ],
   };
   registrations.length = 0;
-  const mod = await import("../index.ts?probe=warm");
+  const mod = await importIndex("../index.ts?probe=warm");
   await mod.default(fakePi);
 
-  assert(registrations.length === 1, "registers offline with a warm store");
+  assert(regCount() === 1, "registers offline with a warm store");
   const offline = await invokeRefresh({ allowNetwork: false });
   const unknown = offline.find((m) => m.id === "a-random/unknown-model-1b");
   assert(unknown !== undefined, "offline phase serves stored ids after the gateway dies");
@@ -335,7 +348,7 @@ async function probeOfflineWarm(): Promise<void> {
 async function probeTombstones(): Promise<void> {
   const cacheDir = freshCacheDir();
   await withGateway(async (port) => {
-    const { tombstonesFilePathFor } = (await import("../index.ts?probe=tomb-helpers")) as {
+    const { tombstonesFilePathFor } = (await importIndex("../index.ts?probe=tomb-helpers")) as {
       tombstonesFilePathFor(u: string): string;
     };
     // The tombstone store filename is a pure function of the gateway URL.
@@ -353,7 +366,7 @@ async function probeTombstones(): Promise<void> {
     stored = { url: baseUrlFor(port), models: [AUTO_RECORD, OLD_RECORD] };
     registrations.length = 0;
 
-    const mod = await import("../index.ts?probe=tomb");
+    const mod = await importIndex("../index.ts?probe=tomb");
     await mod.default(fakePi);
     const seed = modelsOf(registrations[0]);
     assert(!seed.some((m) => m.id === "provider/legacy-model"), "legacy unscoped cache file is ignored");
@@ -390,7 +403,7 @@ async function probeKeyless(): Promise<void> {
     process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
     registrations.length = 0;
     stored = undefined;
-    const mod = await import("../index.ts?probe=keyless");
+    const mod = await importIndex("../index.ts?probe=keyless");
     await mod.default(fakePi);
     assert(registrations[0].config.apiKey === "keyless", "keyless placeholder keeps the models available in pi");
 
@@ -404,11 +417,15 @@ async function probeKeyless(): Promise<void> {
 }
 
 async function probePipeline(): Promise<void> {
-  const m = await import("../models.ts?probe=pure");
-  const rec = (over: Record<string, unknown>) => ({
-    reasoning: false, input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 200000, maxTokens: 32768, ...over,
+  const m = await importModels("../models.ts?probe=pure");
+  const rec = (over: Partial<ModelRecord> & Pick<ModelRecord, "id">): ModelRecord => ({
+    ...over,
+    name: over.name ?? over.id,
+    reasoning: over.reasoning ?? false,
+    input: over.input ?? ["text"],
+    cost: over.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: over.contextWindow ?? 200000,
+    maxTokens: over.maxTokens ?? 32768,
   });
 
   // Patch applies per-field and sanitation strips reasoning compat from non-reasoning models.
@@ -451,18 +468,18 @@ async function probeGatewayScoping(): Promise<void> {
     process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
     registrations.length = 0;
     stored = undefined;
-    const mod = await import("../index.ts?probe=scopeA");
+    const mod = await importIndex("../index.ts?probe=scopeA");
     await mod.default(fakePi);
     const modelsA = await invokeRefresh();
     assert(modelsA.length === 5, "gateway A catalog refreshed");
-    assert(stored?.url === baseUrlFor(portA), "publication carries the gateway url");
+    assert((stored as Stored | undefined)?.url === baseUrlFor(portA), "publication carries the gateway url");
   });
   // Session 2 (new process env): different gateway URL, offline store kept.
   delete process.env.OMNIROUTE_API_KEY;
   process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1/v1";
   process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
   registrations.length = 0;
-  const modB = await import("../index.ts?probe-scopeB");
+  const modB = await importIndex("../index.ts?probe-scopeB");
   await modB.default(fakePi);
   const offline = await invokeRefresh({ allowNetwork: false });
   assert(offline.length === CURATED_COUNT, "gateway B serves curated — A's catalog is not leaked offline");
@@ -476,7 +493,7 @@ async function probeHeaders(): Promise<void> {
     process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
     if (keyed) process.env.OMNIROUTE_API_KEY = "env-real-key-123";
     else delete process.env.OMNIROUTE_API_KEY;
-    const mod = await import(`../index.ts?probe=headers-${keyed ? "keyed" : "keyless"}`);
+    const mod = await importIndex(`../index.ts?probe=headers-${keyed ? "keyed" : "keyless"}`);
     const headerHandler = handlers.get("before_provider_headers");
     assert(typeof headerHandler === "function", "before_provider_headers handler registered");
     const run = (auth: string | undefined, provider: string): Record<string, string | null> => {
@@ -506,8 +523,8 @@ async function probeHeaders(): Promise<void> {
 }
 
 async function probeCap(): Promise<void> {
-  const m = await import("../models.ts?probe=cap");
-  const rec = (id: string) => ({
+  const m = await importModels("../models.ts?probe=cap");
+  const rec = (id: string): ModelRecord => ({
     id, name: id, reasoning: false, input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32768,
   });
@@ -528,6 +545,27 @@ async function probeCap(): Promise<void> {
   console.log("probe 10 OK — layered catalog honors the 1000-model cap with deterministic priority");
 }
 
+async function probePublishRejects(): Promise<void> {
+  await withGateway(async (port) => {
+    process.env.OMNIROUTE_API_KEY = "reject-key";
+    process.env.OMNIROUTE_BASE_URL = baseUrlFor(port);
+    process.env.OMNIROUTE_CACHE_DIR = freshCacheDir();
+    registrations.length = 0;
+    stored = undefined;
+    const mod = await importIndex("../index.ts?probe=publish-rejects");
+    await mod.default(fakePi);
+    // pi's store rejects the publication; the merged catalog must still be
+    // registered for the session and returned to pi -- never thrown out.
+    const models = await invokeRefresh({ publishFails: true });
+    assert(models.length === 5, `merged catalog still served after rejection, got ${models.length}`);
+    assert(models.some((m) => m.id === "google/gemini-3-pro"), "live ids present despite rejection");
+    assert(regCount() === 2, "hot-swap registered despite the rejected publication");
+    assert(stored === undefined, "rejected publication did not persist");
+    void mod;
+    console.log("probe 12 OK — a rejected publication degrades to a session-local hot-swap");
+  });
+}
+
 // ── Run ───────────────────────────────────────────────────────────────────────
 try {
   await probeLive();
@@ -541,6 +579,7 @@ try {
   await probeHeaders();
   await probeCap();
   await probeGatewayScoping();
+  await probePublishRejects();
   console.log("ALL PROBES PASSED");
 } finally {
   for (const dir of cacheDirs) fs.rmSync(dir, { recursive: true, force: true });
