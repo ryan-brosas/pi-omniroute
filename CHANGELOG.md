@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHub Actions via trusted publishing, plus the workflow and docs fixes below.
 
+## [Unreleased]
+
+### Fixed
+
+- npm publishing is single-pathed: npm allows one trusted publisher per package, and GitHub's OIDC token for a reusable-workflow call carries the calling workflow's file — which cannot match a registration on `npm-publish.yml`. The tag-triggered publish job was removed from `release.yml`; `npm-publish.yml` (Actions → npm publish, or `gh workflow run npm-publish.yml`) is the one publish path. README updated to match.
+
 ### Added
 
 - `release.yml` release CI — every push to `main` packs the npm tarball after a full

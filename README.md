@@ -65,13 +65,13 @@ Release automation lives in the [`release` workflow](.github/workflows/release.y
   artifact always exists for the latest commit.
 - **Every `v*` tag** (`v0.3.0`, …) produces a **stable release** on the Releases page with
   label-driven release notes (see [`.github/release.yml`](.github/release.yml)) and the same
-  tarball attached, and publishes that tarball to npm with provenance — no token or GitHub
-  secret; publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers).
-  Manual `npm publish` still runs the full gate via `prepublishOnly`.
-- **Publish to npm on demand** — Actions → **npm publish** → Run workflow: runs the full gate,
-  optionally takes a `version` input (empty = `package.json` version), fails fast when the
-  version already exists on npm, and publishes with provenance. Until the first publish, the
-  npm install commands below do not resolve.
+  tarball attached.
+- **Publish to npm** — Actions → **npm publish** → Run workflow (or `gh workflow run
+  npm-publish.yml` after tagging): runs the full gate, optionally takes a `version` input
+  (empty = `package.json` version), fails fast when the version already exists on npm, and
+  publishes with [provenance](https://docs.npmjs.com/generating-provenance-statements) —
+  authenticated via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers), no
+  token or GitHub secret. Manual `npm publish` still runs the full gate via `prepublishOnly`.
 
 **One-time npm setup (on npm's website):** on npmjs.com, register trusted publishing for
 `ryan-brosas/pi-omniroute` — one entry per publishing workflow: `npm-publish.yml` (on-demand)
