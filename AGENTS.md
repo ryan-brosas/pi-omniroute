@@ -3,7 +3,7 @@
 | `CONTRIBUTING.md` | Contributor rules: data curation, PR hygiene, `bun verify` |
 | `SECURITY.md` | Reporting + scope. Keyless mode must never send a placeholder key |
 | `CHANGELOG.md` | Keep a Changelog; user-visible changes get an entry under `[Unreleased]` |
-| `.github/` | quality.yml gates (check/test/typecheck + required job), release.yml (stable `v*` + per-push continuous GitHub Releases + npm publish on `v*` tags), npm-publish.yml (on-demand npm publish, workflow_dispatch), pr-quality.yml anti-slop gate, dependabot (actions + npm), PR/issue templates |
+| `.github/` | quality.yml gates (check/test/typecheck + required job), release.yml (per-push continuous GitHub Releases), npm-publish.yml (npm publish + stable GitHub Release, workflow_dispatch), pr-quality.yml anti-slop gate, dependabot (actions + npm), PR/issue templates |
 | `README.md` | User docs. Keep the quickstart and env-var table in sync with code defaults |# AGENTS.md
 
 ## Project purpose
