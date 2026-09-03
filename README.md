@@ -63,13 +63,15 @@ Release automation lives in the [`release` workflow](.github/workflows/release.y
 - **Every push to `main`** runs the full gate (`bun run verify`), packs the npm tarball, and
   publishes a `continuous-*` **pre-release** on [GitHub Releases](/releases) — an installable
   artifact always exists for the latest commit.
-- **Publish to npm + cut the stable GitHub Release** — Actions → **npm publish** → Run workflow
-  (or `gh workflow run npm-publish.yml`): runs the full gate, optionally takes a `version` input
-  (empty = `package.json` version), fails fast when the version already exists on npm, publishes
-  with [provenance](https://docs.npmjs.com/generating-provenance-statements) — authenticated via
+- **Every `v*` tag** (`v0.3.0`, …) produces a **stable release** on the Releases page with
+  generated release notes and the same tarball attached.
+- **Publish to npm** — Actions → **npm publish** → Run workflow (or `gh workflow run
+  npm-publish.yml`): runs the full gate, optionally takes a `version` input (empty =
+  `package.json` version), fails fast when the version already exists on npm, publishes with
+  [provenance](https://docs.npmjs.com/generating-provenance-statements) — authenticated via
   [npm trusted publishing](https://docs.npmjs.com/trusted-publishers), no token or GitHub secret —
-  then cuts the release: tag `v<version>`, tarball attached, `--latest` (prerelease for
-  hyphenated versions). Manual `npm publish` still runs the full gate via `prepublishOnly`.
+  and cuts the matching GitHub Release unless the tag release already exists. Manual `npm publish`
+  still runs the full gate via `prepublishOnly`.
 
 **One-time npm setup (on npm's website):** on npmjs.com, register trusted publishing for
 `ryan-brosas/pi-omniroute` — one entry per publishing workflow: `npm-publish.yml` (on-demand)

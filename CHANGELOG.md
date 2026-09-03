@@ -17,11 +17,10 @@ Release 0.4.0 ships the publishing pipeline: tokenless npm publishing from GitHu
 
 ### Fixed
 
-- `release.yml` is continuous-only: manual `v*` tags raced with `npm-publish.yml`'s own
-  GitHub Release (softprops cannot update a release created outside Actions), and npm allows one
-  trusted publisher per package — the tag-path publish job was already gone (#19); the tag
-  trigger and stable-release job are now gone too. `npm-publish.yml` owns npm publishes and
-  stable releases end to end.
+- `release.yml` regains the tag-triggered stable-release job (v* tags cut the stable GitHub
+  Release with the verified tarball). `npm-publish.yml` publishes to npm and skips its
+  GitHub-Release step when the tag release already exists — both paths can run for the same
+  version without colliding.
 - npm publishing is single-pathed: npm allows one trusted publisher per package, and GitHub's OIDC token for a reusable-workflow call carries the calling workflow's file — which cannot match a registration on `npm-publish.yml`. The tag-triggered publish job was removed from `release.yml`; `npm-publish.yml` (Actions → npm publish, or `gh workflow run npm-publish.yml`) is the one publish path. README updated to match.
 
 ### Added
