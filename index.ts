@@ -115,7 +115,13 @@ function loadTombstones(): Tombstones {
 function saveTombstones(tombstones: Tombstones): void {
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(TOMBSTONES_PATH, JSON.stringify(tombstones, null, 2) + "\n");
+    // Atomic write: a crash mid-write must not truncate the store (a corrupt
+    // store silently costs the whole grace window on next load). The tmp file
+    // is unique per write so concurrent sessions (each with their own pid)
+    // cannot rename each other's unfinished write.
+    const tmp = `${TOMBSTONES_PATH}.${process.pid}.${Date.now().toString(36)}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(tombstones, null, 2) + "\n");
+    fs.renameSync(tmp, TOMBSTONES_PATH);
   } catch {
     /* non-fatal: an unwritable store only costs the grace window */
   }
@@ -231,6 +237,10 @@ function registerModels(pi: ExtensionAPI, models: ModelRecord[]): void {
     name: PROVIDER_NAME,
     baseUrl,
     apiKey: resolveApiKey() ? "$OMNIROUTE_API_KEY" : KEYLESS_API_KEY,
+    // Put the resolved key into pi's header pipeline (not just the OpenAI SDK's
+    // own auth): the before_provider_headers hook can then strip the keyless
+    // placeholder, and a nulled header deletes the SDK-added Authorization.
+    authHeader: true,
     api: "openai-completions",
     models,
     refreshModels: (context) => refreshFor(pi, context),
@@ -264,10 +274,17 @@ async function refreshFor(
     saveTombstones(tombstones);
     const models = buildModels(base, custom, patch, tombstones, now);
     const entry = { models: base, checkedAt: now, url: baseUrl } as unknown as ModelsStoreEntry;
-    await context.publish({
-      persist: entry,
-      update: () => registerModels(pi, models),
-    });
+    try {
+      await context.publish({
+        persist: entry,
+        update: () => registerModels(pi, models),
+      });
+    } catch {
+      // pi refused the publication (store write failure, shutdown race): keep
+      // the merged catalog hot-swapped for this session. refreshModels still
+      // never throws.
+      registerModels(pi, models);
+    }
     return models;
   }
   // Gateway unreachable / empty: keep the current catalog, no store mutation.

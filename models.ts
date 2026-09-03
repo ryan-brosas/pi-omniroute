@@ -29,22 +29,29 @@ export interface CatalogEntry {
   output_modalities?: unknown; // e.g. ["image"] for Stable-Diffusion-style ids
 }
 
+// pi only drives chat completions: any entry typed as one of these is dropped,
+// not just image generators (embedding/audio/video models would register and
+// then fail at request time).
+const NON_CHAT_TYPES = new Set(["image", "embedding", "audio", "video", "music", "rerank", "moderation"]);
+
 // ─── Model metadata heuristics ────────────────────────────────────────────────
 // The gateway's /v1/models does not reliably report reasoning or vision for
 // every entry; providers expose ids both bare ("gemini-2.5-pro") and prefixed
 // ("google/gemini-3-pro"). These lists classify the *stem* of the id.
 
 const REASONING_HINTS = [
-  "claude-opus", "claude-sonnet", "claude-haiku", "claude-3-7", "claude-3-5",
+  "claude-opus", "claude-sonnet", "claude-haiku", "claude-3-7",
   "gpt-5", "o1-", "o3-", "o4-",
   "gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash-thinking",
-  "deepseek-r1", "qwq", "kimi-k3", "glm-5", "grok-4", "grok-3",
+  "deepseek-r1", "qwq", "kimi-k3", "grok-4", "grok-3",
 ];
 const VISION_HINTS = [
-  "claude-", "gpt-", "gemini-",
+  "claude-3", "claude-opus", "claude-sonnet", "claude-haiku",
+  "gpt-4o", "chatgpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-5", "o3", "o4-",
+  "gemini-",
   "qwen3-vl", "qwen-2.5-vl", "qwen2.5-vl",
-  "glm-4.5v", "glm-4.6v", "glm-5", "kimi-k", "kimi-k3", "grok-",
-  "pixtral", "llama-3.2-", "llama-4", "minimax",
+  "glm-4.5v", "glm-4.6v", "glm-5v",
+  "pixtral", "llama-4", "grok-2-vision", "grok-vision", "minimax-vl",
 ];
 const REASONING_ROUTE_STEMS = new Set(["reasoning", "reasoning:pro", "best-reasoning", "pro-reasoning"]);
 const VISION_ROUTE_STEMS = new Set(["vision", "best-vision", "pro-vision", "multimodal"]);
@@ -68,7 +75,9 @@ export function inferMetadata(
   return {
     reasoning,
     input: vision ? ["text", "image"] : ["text"],
-    contextWindow: gemini ? 1_000_000 : 200_000,
+    // Conservative default for unknown ids; the gateway's own context_length
+    // wins when it reports one (applyCatalogLimits).
+    contextWindow: gemini ? 1_000_000 : 128_000,
     maxTokens: reasoning ? 64_000 : 32_768,
   };
 }
@@ -94,9 +103,9 @@ function applyCatalogLimits(model: ModelRecord, entry: CatalogEntry): ModelRecor
 /** Transform one entry of the gateway /v1/models response. */
 export function transformCatalogModel(entry: CatalogEntry): ModelRecord | null {
   if (typeof entry?.id !== "string" || !entry.id) return null;
-  // pi can only drive chat completions; skip image-generation entries the
-  // gateway advertises (aihorde/* SD models and friends).
-  if (entry.type === "image") return null;
+  // pi can only drive chat completions; skip non-chat entries the gateway
+  // advertises (aihorde/* SD models, embedding indexes, and friends).
+  if (typeof entry.type === "string" && NON_CHAT_TYPES.has(entry.type)) return null;
   if (Array.isArray(entry.output_modalities) && !entry.output_modalities.includes("text")) return null;
   const id = entry.id;
   const metadata = inferMetadata(id);
