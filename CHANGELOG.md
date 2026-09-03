@@ -10,8 +10,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `release.yml` release CI — every push to `main` packs the npm tarball after a full
   `bun run verify` and publishes a `continuous-*` pre-release to GitHub Releases; every
-  `v*` tag produces a stable release with label-driven release notes — an installable
-  artifact always exists after a push.
+  `v*` tag produces a stable release with label-driven release notes and publishes the
+  verified tarball to npm with provenance when the `NPM_TOKEN` secret is configured
+  (skipped with a warning when it is not) — an installable artifact always exists after a push.
 
 ### Fixed
 

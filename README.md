@@ -65,10 +65,11 @@ Release automation lives in the [`release` workflow](.github/workflows/release.y
   artifact always exists for the latest commit.
 - **Every `v*` tag** (`v0.3.0`, …) produces a **stable release** on the Releases page with
   label-driven release notes (see [`.github/release.yml`](.github/release.yml)) and the same
-  tarball attached.
-
-npm publishing itself stays a manual maintainer step — `npm publish` runs the full gate via
-`prepublishOnly`.
+  tarball attached, and publishes that tarball to npm with
+  [provenance](https://docs.npmjs.com/generating-provenance-statements) — set the `NPM_TOKEN`
+  secret (Settings → Secrets and variables → Actions) to enable it; without the secret the
+  npm publish is skipped with a warning. Manual `npm publish` still runs the full gate via
+  `prepublishOnly`.
 
 ## Configuration
 
