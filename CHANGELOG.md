@@ -20,6 +20,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `pi-omniroute-tarball/` directory that never existed — the workflow had never
   completed. Download steps now extract into `pi-omniroute-tarball/`.
 
+### Changed
+
+- `typecheck` runs `tsc` from `node_modules/.bin` instead of `bunx tsc`: no network
+  resolution or lockfile side effects, and the script now behaves identically when
+  npm is used as the runner. README no longer claims pnpm support (its auto-install
+  blocks unapproved build scripts and rewrites `node_modules`).
+
 ## [0.3.0] - 2026-09-03
 
 Release 0.3.0 ships the first npm package (pi-omniroute) plus the catalog-lifecycle and curation work below.

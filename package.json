@@ -9,7 +9,7 @@
     "build": "echo 'nothing to build'",
     "check": "bun scripts/check.ts",
     "test": "bun tests/probe.ts",
-    "typecheck": "bunx tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "verify": "bun run check && bun run test && bun run typecheck",
     "prepublishOnly": "bun run verify"
   },
